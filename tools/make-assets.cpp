@@ -215,6 +215,10 @@ int main(int argc, char **argv)
             writeXcursor(dst + "/" + name + ".xcursor", images[32]);
             writeXcursor(dst + "/" + name + "@2x.xcursor", images[64]);
         } else {
+            // Live 11's image lacks some of Live 12's Mac-only cursors (Slice, Chop, ...):
+            // Live 11 never asks for those, so they are skipped.
+            if (!QFile::exists(mac + "/" + name + ".png"))
+                continue;
             for (const char *suffix : {"", "@2x"}) {
                 const QString png = mac + "/" + name + suffix + ".png";
                 Cursor c{QImage(png).convertToFormat(QImage::Format_RGBA8888)};

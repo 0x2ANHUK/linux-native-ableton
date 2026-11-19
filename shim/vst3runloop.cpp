@@ -11,6 +11,7 @@
 // else goes to Live's original function. Addresses are for Live 12.4.7
 // (Push 3 2.4.7, BuildID 0e5b75d8...); the patch is skipped if a slot does
 // not hold the expected pointer.
+#include "livebuild.h"
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QScreen>
@@ -238,8 +239,16 @@ void *createView(void **out, void *plugin)
 
 void *hookFunction(uintptr_t fn, const unsigned char *prologue, size_t len, void *replacement); // hook.cpp
 
+// The Qt run loop as Steinberg::Linux::IRunLoop, for vst3window11.cpp's IPlugFrame.
+void *qtRunLoop()
+{
+    return static_cast<IRunLoop *>(&runLoop);
+}
+
 void installVst3RunLoop()
 {
+    if (liveBuild() != LiveBuild::Live12_4_7)
+        return; // not ported to this Live build yet
     const uintptr_t base = mainExecutableBase();
     const long page = sysconf(_SC_PAGESIZE);
     for (int i = 0; i < 2; ++i) {

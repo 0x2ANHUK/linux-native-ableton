@@ -16,11 +16,38 @@
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
-// Keep the preload out of Live's child processes (sh, lspci, helpers).
+// Keep the preload out of Live's child processes (sh, lspci, helpers), except
+// the AVX-512 emulator (libavx512emu.so): on CPUs without AVX-512 the launcher
+// preloads it, and Live's helpers (Ableton Index, Plugin Scanner, XPython3Exe)
+// need it as much as Live does.
 __attribute__((constructor)) static void dropPreload()
 {
-    unsetenv("LD_PRELOAD");
+    // Child processes keep the AVX-512 emulator and libpathfix.so (tools/launcher.c),
+    // in that order; the shim itself and anything else are dropped.
+    const char *old = getenv("LD_PRELOAD");
+    char keep[2][PATH_MAX] = {"", ""};
+    static const char *const kept[2] = {"libavx512emu.so", "libpathfix.so"};
+    if (old) {
+        const char *p = old;
+        while (*p) {
+            const char *end = p + strcspn(p, ": ");
+            const size_t n = static_cast<size_t>(end - p);
+            for (int k = 0; k < 2; ++k)
+                if (n && n < sizeof keep[k] && memmem(p, n, kept[k], strlen(kept[k])) && !keep[k][0]) {
+                    memcpy(keep[k], p, n);
+                    keep[k][n] = '\0';
+                }
+            p = *end ? end + 1 : end;
+        }
+    }
+    char value[2 * PATH_MAX + 2];
+    snprintf(value, sizeof value, "%s%s%s", keep[0], keep[0][0] && keep[1][0] ? ":" : "", keep[1]);
+    if (value[0])
+        setenv("LD_PRELOAD", value, 1);
+    else
+        unsetenv("LD_PRELOAD");
 }
 
 // MENUFIX_DEBUG=<file> appends a trace there (Live redirects stderr).
@@ -36,6 +63,7 @@ void menufixTrace(const char *fmt, int a, int b, int c)
 }
 void installVst3RunLoop();
 void installPluginCloseHook();
+void installVst3Window11(); // vst3window11.cpp
 void installPaintHook();
 void installFrameBufferHook();
 void installNativeMenu();
@@ -211,6 +239,7 @@ static void installMenuCloser()
     trace("filter installed\n");
     installVst3RunLoop();
     installPluginCloseHook();
+    installVst3Window11();
     installFrameBufferHook();
     installPaintHook();
     installNativeMenu();

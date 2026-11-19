@@ -57,6 +57,7 @@
 // step, and a drag down that turned up kept zooming in. While Live's blank
 // cursor is set and a button is held, Live's other cursors are not applied;
 // Live sets its cursor again on release.
+#include "livebuild.h"
 #include <QDrag>
 #include <QDragMoveEvent>
 #include <QGuiApplication>
@@ -88,6 +89,14 @@ namespace {
 constexpr uintptr_t kDragMoveSlot = 0x945d508; // TQtView vtable, dragMoveEvent
 constexpr uintptr_t kDragMoveEvent = 0x1ff30f0;
 constexpr uintptr_t kBlankCursorReturn = 0x1fe4e1b; // after Live's XCreatePixmapCursor call
+// Live 11.3.43: the blank cursor is made at 0x1b8e96b (in 0x1b8e490, Live 12's
+// 0x1fe49f0). Its internal drags (browser item onto a track, clips, devices)
+// are Live's own, not Qt drags: Live sets NoDragCursor on its window itself and
+// it is seen, so its view's dragMoveEvent (0x1b9c2e0, files from other
+// programs only) needs no wrapper. Its one QDrag (0x1b9bd20, from 0x1b9d480)
+// drags files out of Live (QMimeData::setUrls) to other programs, so it keeps
+// Qt's own cursors and the XdndSelection the other program needs.
+constexpr uintptr_t kBlankCursorReturn11 = 0x1b8e970;
 
 using DragMoveFn = void (*)(QWidget *, QDragMoveEvent *);
 DragMoveFn liveDragMove;
@@ -372,7 +381,8 @@ extern "C" Cursor XCreatePixmapCursor(Display *dpy, Pixmap source, Pixmap mask, 
     using CreateFn = Cursor (*)(Display *, Pixmap, Pixmap, XColor *, XColor *, unsigned int, unsigned int);
     static auto real = reinterpret_cast<CreateFn>(nextSymbol("XCreatePixmapCursor", nullptr));
     const Cursor cursor = real(dpy, source, mask, foreground, background, x, y);
-    if (uintptr_t(__builtin_return_address(0)) == mainExecutableBase() + kBlankCursorReturn)
+    if (uintptr_t(__builtin_return_address(0))
+        == mainExecutableBase() + (liveBuild() == LiveBuild::Live11_3_43 ? kBlankCursorReturn11 : kBlankCursorReturn))
         blankCursor = cursor;
     return cursor;
 }
@@ -407,6 +417,8 @@ extern "C" int _ZN5QDrag4execE6QFlagsIN2Qt10DropActionEE(QDrag *drag, int action
 {
     using ExecFn = int (*)(QDrag *, int);
     static auto real = reinterpret_cast<ExecFn>(nextSymbol("_ZN5QDrag4execE6QFlagsIN2Qt10DropActionEE", "Qt_5"));
+    if (liveBuild() != LiveBuild::Live12_4_7)
+        return real(drag, actions);
     static QPixmap move;
     static int moveSize = 0;
     if (liveDisplay && cursorSize(liveDisplay) != moveSize) {
@@ -424,6 +436,12 @@ extern "C" int _ZN5QDrag4execE6QFlagsIN2Qt10DropActionEE(QDrag *drag, int action
 
 void installDragCursor()
 {
+    if (liveBuild() == LiveBuild::Live11_3_43) {
+        menufixTrace("dragcursor: Live 11 (cursor sizes, wait cursor, hidden cursor)\n");
+        return; // no Qt drag inside Live 11, see kBlankCursorReturn11
+    }
+    if (liveBuild() != LiveBuild::Live12_4_7)
+        return; // not ported to this Live build
     const uintptr_t base = mainExecutableBase();
     auto *slot = reinterpret_cast<uintptr_t *>(base + kDragMoveSlot);
     if (*slot != base + kDragMoveEvent) {

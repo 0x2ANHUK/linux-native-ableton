@@ -20,6 +20,8 @@
 // without it only "System Default" is listed. LIVE_ALSA_DEVICES=hw shows the
 // sound cards as before; LIVE_ALSA_EXCLUSIVE and LIVE_ALSA_DEVICE do too.
 #include "pwdevices.h"
+#include <string>
+#include "audiodrivers.h"
 #include <alsa/asoundlib.h>
 #include <dlfcn.h>
 #include <link.h>
@@ -30,6 +32,8 @@
 #include <deque>
 #include <cstdlib>
 #include <cstring>
+#include <glob.h>
+#include <unistd.h>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -37,6 +41,8 @@
 
 void menufixTrace(const char *fmt, int a = 0, int b = 0, int c = 0);
 void *nextSymbol(const char *name, const char *version); // embedded.cpp
+
+bool pipewireDefaults(std::string &sink, std::string &source); // pwgraph.cpp
 
 namespace {
 
@@ -205,10 +211,16 @@ void rescan()
         menufixTrace("pwdevices: no PulseAudio/PipeWire server answered; listing System Default only\n");
         return;
     }
+    // Without a default input (a desktop with no microphone or line input
+    // chosen) "System Default" has no input side: Live 11 starts with System
+    // Default as its input device, and opening it failed (ENOENT in
+    // snd_pcm_hw_params, "The device "System Default" only has input
+    // channels"), so Live started without audio. Live 12 starts with no input
+    // device and never met it. Same for a missing default output.
     for (const Node &node : query.nodes) {
-        if (node.name == query.defaultSink)
+        if (node.name == query.defaultSink && node.playback)
             devices[0].playbackChannels = node.channels;
-        if (node.name == query.defaultSource)
+        if (node.name == query.defaultSource && !node.playback)
             devices[0].captureChannels = node.channels;
         size_t i = 1;
         while (i < devices.size() && !(devices[i].node == node.name && devices[i].playback == node.playback))
@@ -221,7 +233,21 @@ void rescan()
         devices[i].playbackChannels = devices[i].captureChannels = node.channels;
         present[i] = true;
     }
+    // "System Default" opens pipewire-alsa's PCM, which follows PipeWire's own
+    // default devices; when PipeWire has no default input (or output), that
+    // side is left out of the menu. The PulseAudio API above reports a fallback
+    // device in that case, so PipeWire is asked directly.
+    std::string pwSink, pwSource;
+    if (pipewireDefaults(pwSink, pwSource)) {
+        devices[0].playback = !pwSink.empty();
+        devices[0].capture = !pwSource.empty();
+    } else {
+        devices[0].playback = devices[0].capture = true;
+    }
     menufixTrace("pwdevices: %d PipeWire devices\n", int(query.nodes.size()));
+    if (!devices[0].playback || !devices[0].capture)
+        menufixTrace("pwdevices: System Default: output %d, input %d (PipeWire's default devices)\n",
+                     devices[0].playback, devices[0].capture);
 }
 
 // Live's snd_ctl_t and info structs for the listed devices.
@@ -254,6 +280,15 @@ void remember(const void *info, int card)
     filledInfos[nextFilled++ % 16] = {info, card};
 }
 
+// A real card filled this struct: forget an earlier fake fill of the same memory.
+void forget(const void *info)
+{
+    std::lock_guard<std::mutex> lock(filledMutex);
+    for (Filled &f : filledInfos)
+        if (f.info == info)
+            f.info = nullptr;
+}
+
 int filledCard(const void *info)
 {
     std::lock_guard<std::mutex> lock(filledMutex);
@@ -266,6 +301,8 @@ int filledCard(const void *info)
 // Where Live's name strings point: they must outlive the info struct.
 const char *stableName(int card)
 {
+    if (card == kJackCard)
+        return "JACK";
     std::lock_guard<std::mutex> lock(devicesMutex);
     static std::deque<std::string> names; // growing keeps the strings in place; Live copies them at once
     const size_t i = card - kFirstVirtualCard;
@@ -335,6 +372,32 @@ int statDevSnd(Fn real, const char *path, Stat *buf)
 
 } // namespace
 
+// Waits (up to ms) until PipeWire lists its default output (playback) or input
+// again. Used right after the shim handed a sound card back (driver type ALSA ->
+// PipeWire): WirePlumber makes that card's sink and source anew, and a stream
+// opened before then finds no default device (ENOENT in snd_pcm_hw_params).
+bool waitForPipeWireDefault(bool playback, int ms)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    for (int tries = 0;; ++tries) {
+        Query query;
+        if (queryPulse(query)) {
+            const std::string &wanted = playback ? query.defaultSink : query.defaultSource;
+            for (const Node &node : query.nodes)
+                // auto_null: pipewire-pulse's placeholder while there is no real device yet
+                if (!wanted.empty() && wanted != "auto_null" && node.name == wanted && node.playback == playback) {
+                    if (tries)
+                        menufixTrace("pwdevices: default device (playback %d) back after %d tries\n", playback ? 1 : 0, tries);
+                    return true;
+                }
+        }
+        if (std::chrono::steady_clock::now() >= deadline)
+            return false;
+        usleep(100000);
+    }
+}
+
+
 bool virtualDevicesEnabled()
 {
     static const bool enabled = [] {
@@ -346,12 +409,66 @@ bool virtualDevicesEnabled()
 
 bool virtualDevice(int card, VirtualDevice &device)
 {
+    if (card == kJackCard) { // driver type JACK (audiodrivers.cpp, jackaudio.cpp)
+        device = {"", "JACK", true, true, jackChannels(true), jackChannels(false)};
+        return true;
+    }
     std::lock_guard<std::mutex> lock(devicesMutex);
     const size_t i = card - kFirstVirtualCard;
     if (card < kFirstVirtualCard || i >= devices.size())
         return false;
     device = devices[i];
     return true;
+}
+
+// Cards whose outputs are all HDMI or DisplayPort (/proc/asound/cardN/pcm*p/info).
+bool displayOnlyCard(int card)
+{
+    char pattern[64];
+    snprintf(pattern, sizeof pattern, "/proc/asound/card%d/pcm*p/info", card);
+    glob_t found;
+    if (glob(pattern, 0, nullptr, &found) != 0)
+        return false;
+    bool any = false, allDisplay = true;
+    for (size_t i = 0; i < found.gl_pathc; ++i)
+        if (FILE *f = fopen(found.gl_pathv[i], "r")) {
+            char line[256];
+            while (fgets(line, sizeof line, f))
+                if (!strncmp(line, "name: ", 6)) {
+                    any = true;
+                    if (!strstr(line, "HDMI") && !strstr(line, "DisplayPort") && !strstr(line, " DP"))
+                        allDisplay = false;
+                }
+            fclose(f);
+        }
+    globfree(&found);
+    return any && allDisplay;
+}
+
+// Driver type ALSA: Live picks the first card when nothing is saved, and on
+// laptops that is usually the graphics chip's HDMI output, silent without a
+// screen. Cards with only HDMI/DisplayPort outputs are listed after the others
+// (their numbers stay the same).
+template <typename Fn> int nextCardDisplaysLast(Fn real, int *card)
+{
+    static std::vector<int> order;
+    if (*card < 0) {
+        std::vector<int> first, last;
+        for (int c = -1; real(&c) == 0 && c >= 0;)
+            (displayOnlyCard(c) ? last : first).push_back(c);
+        order = first;
+        order.insert(order.end(), last.begin(), last.end());
+    }
+    size_t i = 0;
+    if (*card >= 0) {
+        while (i < order.size() && order[i] != *card)
+            ++i;
+        if (i == order.size())
+            return real(card); // not from our list: alsa-lib's order
+        ++i;
+    }
+    *card = i < order.size() ? order[i] : -1;
+    return 0;
 }
 
 // Live's references are versioned ALSA_0.9 (shim/qt5.map).
@@ -361,6 +478,13 @@ extern "C" int snd_card_next(int *card)
     static auto real = reinterpret_cast<Fn>(nextSymbol("snd_card_next", "ALSA_0.9"));
     if (!card || !virtualDevicesEnabled() || !fromLive(__builtin_return_address(0)))
         return real(card);
+    // Driver type ALSA lists the sound cards themselves, JACK its one device (audiodrivers.cpp)
+    if (scanBackend() == AudioBackend::Alsa)
+        return nextCardDisplaysLast(real, card);
+    if (scanBackend() == AudioBackend::Jack) {
+        *card = *card < kJackCard ? kJackCard : -1;
+        return 0;
+    }
     if (*card < kFirstVirtualCard) {
         startWatching();
         rescan();
@@ -400,8 +524,10 @@ extern "C" int snd_ctl_card_info(snd_ctl_t *ctl, snd_ctl_card_info_t *info)
     using Fn = int (*)(snd_ctl_t *, snd_ctl_card_info_t *);
     static auto real = reinterpret_cast<Fn>(nextSymbol("snd_ctl_card_info", "ALSA_0.9"));
     const int card = controlCard(ctl);
-    if (card < 0)
+    if (card < 0) {
+        forget(info);
         return real(ctl, info);
+    }
     remember(info, card);
     return 0;
 }
@@ -430,8 +556,10 @@ extern "C" int snd_ctl_pcm_info(snd_ctl_t *ctl, snd_pcm_info_t *info)
     using Fn = int (*)(snd_ctl_t *, snd_pcm_info_t *);
     static auto real = reinterpret_cast<Fn>(nextSymbol("snd_ctl_pcm_info", "ALSA_0.9"));
     const int card = controlCard(ctl);
-    if (card < 0)
+    if (card < 0) {
+        forget(info);
         return real(ctl, info);
+    }
     VirtualDevice device;
     if (!virtualDevice(card, device) || snd_pcm_info_get_device(info) != 0)
         return -ENOENT;

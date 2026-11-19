@@ -85,7 +85,16 @@ void *hookFunction(uintptr_t fn, const unsigned char *prologue, size_t len, void
         return nullptr;
     auto *trampoline = static_cast<unsigned char *>(mem);
     memcpy(trampoline, prologue, len);
-    writeJump(trampoline + len, fn + len);
+    // Back into the function with jmp [rip+0] and the address after it: no
+    // register is changed, so a prologue may end by loading rax (Live 11's
+    // 0x34a9ab0 loads its stack canary there; the movabs rax / jmp rax form
+    // overwrote it and the function failed its stack check).
+    unsigned char *back = trampoline + len;
+    const uintptr_t rest = fn + len;
+    back[0] = 0xff;
+    back[1] = 0x25;
+    memset(back + 2, 0, 4);
+    memcpy(back + 6, &rest, 8);
     if (mprotect(mem, page, PROT_READ | PROT_EXEC) != 0
         || !redirectFunction(fn, prologue, len, replacement)) {
         munmap(mem, page);

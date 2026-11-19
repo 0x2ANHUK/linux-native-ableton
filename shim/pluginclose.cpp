@@ -54,6 +54,7 @@
 // window, then onSize. A plug-in that cannot resize gets its own size back.
 // Addresses are for Live 12.4.7 (Push 3 2.4.7); the hook is skipped if the
 // thunk does not hold the expected bytes.
+#include "livebuild.h"
 #include <QHash>
 #include <QTimer>
 #include <X11/Xlib.h>
@@ -216,6 +217,8 @@ void pluginViewCreated(void *view)
 
 void installPluginCloseHook()
 {
+    if (liveBuild() != LiveBuild::Live12_4_7)
+        return; // not ported to this Live build yet
     base = mainExecutableBase();
     auto *thunk = reinterpret_cast<unsigned char *>(base + kThunk);
     // e9 rel32 to the observer, then padding up to 0x3f2b9b0.
@@ -333,9 +336,17 @@ void fitToView(Display *dpy, Window w)
 
 } // namespace
 
+// maxviews.cpp: Live's Max device views
+bool maxViewMoveResize(Display *dpy, Window w, int &x, int &y, unsigned &width, unsigned &height, void *ret);
+void maxViewMapped(Display *dpy, Window w, void *ret);
+void maxViewUnmapped(Window w, void *ret);
+void maxViewForget(Window w);
+
 extern "C" int XMoveResizeWindow(Display *dpy, Window w, int x, int y, unsigned width, unsigned height)
 {
     static auto real = next<decltype(&XMoveResizeWindow)>("XMoveResizeWindow");
+    if (maxViewMoveResize(dpy, w, x, y, width, height, __builtin_return_address(0)))
+        return real(dpy, w, x, y, width, height);
     if (!windowProps.contains(w))
         return real(dpy, w, x, y, width, height);
     fitSizeHints(dpy, w, width, height);
@@ -346,6 +357,7 @@ extern "C" int XMoveResizeWindow(Display *dpy, Window w, int x, int y, unsigned 
 extern "C" int XMapWindow(Display *dpy, Window w)
 {
     static auto real = next<decltype(&XMapWindow)>("XMapWindow");
+    maxViewMapped(dpy, w, __builtin_return_address(0));
     if (pendingUnmaps.remove(w)) {
         menufixTrace("pluginclose: editor 0x%x hidden and shown again, kept mapped\n", int(w));
         return 1;
@@ -358,6 +370,7 @@ extern "C" int XMapWindow(Display *dpy, Window w)
 extern "C" int XUnmapWindow(Display *dpy, Window w)
 {
     static auto real = next<decltype(&XUnmapWindow)>("XUnmapWindow");
+    maxViewUnmapped(w, __builtin_return_address(0));
     if (!windowProps.contains(w))
         return real(dpy, w);
     pendingUnmaps.insert(w, dpy);
@@ -393,6 +406,7 @@ extern "C" int XResizeWindow(Display *dpy, Window w, unsigned width, unsigned he
 extern "C" int XDestroyWindow(Display *dpy, Window w)
 {
     static auto real = next<decltype(&XDestroyWindow)>("XDestroyWindow");
+    maxViewForget(w);
     windowProps.remove(w);
     pendingUnmaps.remove(w);
     editors.remove(w);

@@ -30,9 +30,20 @@
 // theme would reject every dialog at once, so Qt's own dialog is used instead.
 // LIVE_NATIVE_DIALOGS=0 keeps Live's dialogs.
 //
+// Live keeps running while its own dialog is open. Its modal loop (Live 12
+// 0x1ff39b0, Live 11 0x1b9a370) starts two timers next to its QEventLoop:
+// every 10 ms one calls a slot (0x1ff9770 / 0x1b95bb0), every 50 ms the other
+// (0x1ff9810 / 0x1b95c50). For the time of the loop it sets the flag
+// 0x9bdfc79 / 0x81688d1 (scoped, 0x1b26c00 / 0x162d430); the 10 ms tick does
+// nothing without it. Live's regular tick is the frame the dialog was opened
+// from, so a QFileDialog's loop alone left Live's display standing still until
+// the dialog closed (playback went on). LiveTicks does the same around these
+// dialogs: the flag, then the two timers.
+//
 // A path is a std::string (UTF-8). File kinds map to a 128-bit mask of file
 // type ids (0x1be0b80); the ids, names and extensions below are Live's own
 // file type table (registered in 0x1be15e0). Addresses are for Live 12.4.7.
+#include "livebuild.h"
 #include <QApplication>
 #include <QTimer>
 #include <QDBusConnection>
@@ -45,6 +56,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cxxabi.h>
+#include <iterator>
 #include <link.h>
 #include <new>
 #include <string>
@@ -56,19 +68,42 @@ extern "C" void __cxa_throw(void *, void *, void (*)(void *));
 
 namespace {
 
-constexpr uintptr_t kOpen = 0x217ec70;
-constexpr uintptr_t kSave = 0x217fbc0;
-constexpr uintptr_t kFolder = 0x217f3d0;
-constexpr uintptr_t kKindMask = 0x1be0b80;        // file kind -> file type mask
-constexpr uintptr_t kTypeOfPath = 0x1b387d0;      // path -> file type id
-constexpr uintptr_t kSilentException = 0x1ba8690; // constructor, 0x30 bytes
-constexpr uintptr_t kSilentExceptionType = 0x9436bd0;
-constexpr uintptr_t kSilentExceptionDtor = 0x1ba8900;
+// Live 12.4.7 / Live 11.3.43 (same signatures and receiver slots; Live 11
+// registers its dialogs at 0x1e4bda9, file types at 0x170d300).
+uintptr_t kOpen, kSave, kFolder;
+uintptr_t kKindMask;            // file kind -> file type mask
+uintptr_t kTypeOfPath;          // path -> file type id
+uintptr_t kSilentException;     // constructor, 0x30 bytes
+uintptr_t kSilentExceptionType; // typeinfo for TException
+uintptr_t kSilentExceptionDtor;
 
 // The dialog table (see the top of the file).
-constexpr uintptr_t kSetOpen = 0x1da6e70, kSetSave = 0x1da6e80, kSetFolder = 0x205f620;
-constexpr uintptr_t kOpenSlot = 0x9c08128, kSaveSlot = 0x9c08130, kFolderSlot = 0x9c12e18;
-constexpr uintptr_t kPointerManager = 0x13618e0, kPointerInvoker = 0x13618c0;
+uintptr_t kSetOpen, kSetSave, kSetFolder;
+uintptr_t kOpenSlot, kSaveSlot, kFolderSlot;
+uintptr_t kPointerManager, kPointerInvoker;
+
+bool setAddresses()
+{
+    if (!liveAddress(1, 1))
+        return false;
+    kOpen = liveAddress(0x217ec70, 0x1d073b0);
+    kSave = liveAddress(0x217fbc0, 0x1d085f0);
+    kFolder = liveAddress(0x217f3d0, 0x1d07c80);
+    kKindMask = liveAddress(0x1be0b80, 0x170cb10);
+    kTypeOfPath = liveAddress(0x1b387d0, 0x16447e0);
+    kSilentException = liveAddress(0x1ba8690, 0x16d1a40);
+    kSilentExceptionType = liveAddress(0x9436bd0, 0x7b755e8);
+    kSilentExceptionDtor = liveAddress(0x1ba8900, 0x16d36c0);
+    kSetOpen = liveAddress(0x1da6e70, 0x197fc00);
+    kSetSave = liveAddress(0x1da6e80, 0x197fc10);
+    kSetFolder = liveAddress(0x205f620, 0x1bf37d0);
+    kOpenSlot = liveAddress(0x9c08128, 0x818f620);
+    kSaveSlot = liveAddress(0x9c08130, 0x818f628);
+    kFolderSlot = liveAddress(0x9c12e18, 0x8198a20);
+    kPointerManager = liveAddress(0x13618e0, 0xf98ac0);
+    kPointerInvoker = liveAddress(0x13618c0, 0xf98aa0);
+    return true;
+}
 
 // libstdc++'s std::function: the stored callable, its manager, its invoker.
 struct LiveFunction {
@@ -83,8 +118,8 @@ struct FileType {
     const char *patterns;
 };
 
-// Live's file types with extensions (id, name, patterns).
-const FileType kFileTypes[] = {
+// Live 12.4.7's file types with extensions (id, name, patterns).
+const FileType kFileTypes12[] = {
     {2, "Macintosh AIFF", "*.aif *.aiff"},
     {3, "Ableton Meta Sound", "*.ams"},
     {70, "Broadcast Wave", "*.bwf *.rf64"},
@@ -155,6 +190,90 @@ const FileType kFileTypes[] = {
     {65, "ZIP File", "*.zip"},
 };
 
+// Live 11.3.43's (other ids; from its registrations at 0x170d300).
+const FileType kFileTypes11[] = {
+    {2, "Macintosh AIFF", "*.aif *.aiff"},
+    {3, "Ableton Meta Sound", "*.ams"},
+    {48, "Encrypted FLAC", "*.eflac"},
+    {41, "EXS", "*.exs"},
+    {33, "Lossless Audio", "*.flac"},
+    {40, "GigaSampler", "*.gig"},
+    {34, "MPEG 4 Audio", "*.m4a"},
+    {5, "Standard MIDI File", "*.mid *.midi"},
+    {27, "MPEG Audio Layer-3", "*.mp3"},
+    {28, "Wave Simulation Text", "*.mp7"},
+    {44, "NI Kontakt", "*.nki"},
+    {32, "Ogg Vorbis", "*.ogg"},
+    {35, "Propellerheads Rex", "*.rex *.rcy"},
+    {36, "Propellerheads Rex", "*.rx2"},
+    {4, "Sounddesigner II", "*.sd2"},
+    {39, "SoundFont", "*.sf *.sf2"},
+    {1, "Windows Wave", "*.wav"},
+    {54, "WavPack", "*.wv"},
+    {60, "Windows Media Audio", "*.wma"},
+    {46, "Audio/Video", "*.avi"},
+    {47, "Digital Video", "*.dv"},
+    {49, "MPEG 4 Audio/Video", "*.mp4 *.m4v"},
+    {45, "QuickTime Movie", "*.mov"},
+    {61, "MPEG Media Video", "*.mpg *.m2v"},
+    {59, "Windows Media Video", "*.wmv"},
+    {43, "ISO Image", "*.iso"},
+    {42, "Toast Image", "*.toast"},
+    {7, "Bmp", "*.bmp"},
+    {50, "JPEG graphics", "*.jpeg *.jpg"},
+    {6, "Pcx", "*.pcx"},
+    {56, "Portable Network Graphics", "*.png"},
+    {8, "Tiff", "*.tif *.tiff"},
+    {12, "Ableton Live Set", "*.abl"},
+    {13, "Ableton Live Set Bundle", "*.ablbundle"},
+    {16, "Ableton Device", "*.adv"},
+    {17, "Ableton Device Group", "*.adg"},
+    {15, "Ableton Groove", "*.agr"},
+    {14, "Ableton Live Clip", "*.alc"},
+    {11, "Ableton Live Set", "*.als"},
+    {51, "Ableton Max Device", "*.amxd *.amp"},
+    {26, "Audio Unit Preset", "*.aupreset"},
+    {68, "VST3 Preset File", "*.vstpreset"},
+    {24, "VST Bank", "*.fxb"},
+    {25, "VST Program", "*.fxp"},
+    {52, "Ableton Authorization File", "*.auz"},
+    {9, "Ableton Language File", "*.lng"},
+    {19, "Log File", "*.log"},
+    {18, "Ableton Sound Data", "*.asd"},
+    {63, "Plugin Parameter Config", "*.appc"},
+    {10, "Ableton Preferences", "*.cfg"},
+    {22, "Ableton Text", "*.txt"},
+    {21, "Ableton Theme", "*.ask"},
+    {37, "XML", "*.xml"},
+    {67, "Metadata File", "*.xmp"},
+    {20, "Application", "*.exe *.com"},
+    {62, "Ableton Audio Dump", "*.aad"},
+    {66, "Band File", "*.band"},
+    {30, "Finder Index Database", "*.db"},
+    {53, "GNU Zip", "*.gz"},
+    {29, "Cache Index File", "*.idx"},
+    {38, "Windows Config", "*.ini"},
+    {65, "JSON File", "*.json"},
+    {58, "Lock File", "*.lock"},
+    {31, "Ableton Live Pack", "*.alp"},
+    {23, "Python Script", "*.py"},
+    {55, "View Render Dumps", "*.ard"},
+    {57, "Crash Log", "*.dmp"},
+    {64, "ZIP File", "*.zip"},
+};
+
+struct FileTypes {
+    const FileType *begin_, *end_;
+    const FileType *begin() const { return begin_; }
+    const FileType *end() const { return end_; }
+};
+FileTypes fileTypes()
+{
+    if (liveBuild() == LiveBuild::Live11_3_43)
+        return {std::begin(kFileTypes11), std::end(kFileTypes11)};
+    return {std::begin(kFileTypes12), std::end(kFileTypes12)};
+}
+
 struct TypeMask {
     uint64_t lo, hi;
     bool has(int id) const { return id < 64 ? (lo >> id) & 1 : id < 128 && (hi >> (id - 64)) & 1; }
@@ -166,6 +285,71 @@ using SetTypeFn = void (*)(void *, int, bool);
 using ResultFn = int (*)(void *);
 
 uintptr_t base;
+
+// Live's modal-loop timer slots and flag (see the top of the file): the slots
+// are QSlotObjectBase impl functions of lambdas without captures, called as Qt
+// does, impl(Call = 1, slot object, receiver, arguments, ret). The setter is
+// Live's own "flag = 1" function, checked to find the flag where expected.
+struct ModalCode {
+    uintptr_t at;
+    const unsigned char *bytes;
+    size_t size;
+};
+const unsigned char kTickFast12[] = {0x83, 0xff, 0x01};                    // cmp $1,%edi
+const unsigned char kTickSlow12[] = {0x50, 0x83, 0xff, 0x01};              // push %rax; cmp $1,%edi
+const unsigned char kSetFlag12[] = {0xc6, 0x05, 0x82, 0x90, 0x0b, 0x08, 0x01, 0xc3}; // movb $1,0x9bdfc79; ret
+const unsigned char kTickFast11[] = {0x53, 0x48, 0x83, 0xec, 0x30, 0x64, 0x48, 0x8b, 0x04, 0x25, 0x28, 0, 0, 0};
+const unsigned char kTickSlow11[] = {0x53, 0x48, 0x83, 0xec, 0x10, 0x64, 0x48, 0x8b, 0x04, 0x25, 0x28, 0, 0, 0};
+const unsigned char kSetFlag11[] = {0xc6, 0x05, 0xaa, 0xb4, 0xb3, 0x06, 0x01, 0xc3}; // movb $1,0x81688d1; ret
+
+class LiveTicks {
+public:
+    LiveTicks()
+    {
+        const bool live11 = liveBuild() == LiveBuild::Live11_3_43;
+        const ModalCode fast = live11 ? ModalCode{0x1b95bb0, kTickFast11, sizeof kTickFast11}
+                                      : ModalCode{0x1ff9770, kTickFast12, sizeof kTickFast12};
+        const ModalCode slow = live11 ? ModalCode{0x1b95c50, kTickSlow11, sizeof kTickSlow11}
+                                      : ModalCode{0x1ff9810, kTickSlow12, sizeof kTickSlow12};
+        const ModalCode setFlag = live11 ? ModalCode{0x162d420, kSetFlag11, sizeof kSetFlag11}
+                                         : ModalCode{0x1b26bf0, kSetFlag12, sizeof kSetFlag12};
+        const uintptr_t flag = live11 ? 0x81688d1 : 0x9bdfc79;
+        auto matches = [](const ModalCode &c) { return !memcmp(reinterpret_cast<const void *>(base + c.at), c.bytes, c.size); };
+        static const bool known = liveAddress(1, 1) && matches(fast) && matches(slow) && matches(setFlag);
+        if (!known) {
+            menufixTrace("filedialogs: Live's modal timers not as expected, off\n");
+            return;
+        }
+        flag_ = reinterpret_cast<volatile bool *>(base + flag);
+        saved_ = *flag_;
+        *flag_ = true;
+        start(fast_, fast.at, 10);
+        start(slow_, slow.at, 50);
+    }
+    ~LiveTicks()
+    {
+        fast_.stop();
+        slow_.stop();
+        if (flag_)
+            *flag_ = saved_;
+    }
+    LiveTicks(const LiveTicks &) = delete;
+    LiveTicks &operator=(const LiveTicks &) = delete;
+
+private:
+    static void start(QTimer &timer, uintptr_t impl, int ms)
+    {
+        QObject::connect(&timer, &QTimer::timeout, [impl] {
+            alignas(16) unsigned char slotObject[0x18] = {}; // what the lambdas would own: nothing
+            reinterpret_cast<void (*)(int, void *, QObject *, void **, bool *)>(base + impl)(1, slotObject, nullptr,
+                                                                                            nullptr, nullptr);
+        });
+        timer.start(ms);
+    }
+    QTimer fast_, slow_;
+    volatile bool *flag_ = nullptr;
+    bool saved_ = false;
+};
 
 template <typename Fn>
 Fn virtualAt(void *object, size_t offset)
@@ -194,7 +378,7 @@ QString fromPath(const std::string *path)
 QStringList filtersFor(TypeMask mask, QStringList *allPatterns = nullptr)
 {
     QStringList filters, patterns;
-    for (const FileType &t : kFileTypes) {
+    for (const FileType &t : fileTypes()) {
         if (!mask.has(t.id))
             continue;
         filters << QStringLiteral("%1 (%2)").arg(QString::fromLatin1(t.name), QString::fromLatin1(t.patterns));
@@ -252,9 +436,11 @@ void throwSilent()
 void openFile(const void *title, const std::string *dir, int kind, void *receiver)
 {
     const auto mask = reinterpret_cast<TypeMask (*)(int)>(base + kKindMask)(kind);
-    const QString file = QFileDialog::getOpenFileName(dialogParent(), fromTText(title), startDir(dir),
-                                                      filtersFor(mask).join(QStringLiteral(";;")), nullptr,
-                                                      dialogOptions());
+    const QString file = [&] {
+        LiveTicks ticks;
+        return QFileDialog::getOpenFileName(dialogParent(), fromTText(title), startDir(dir),
+                                            filtersFor(mask).join(QStringLiteral(";;")), nullptr, dialogOptions());
+    }();
     menufixTrace("filedialogs: open kind %d -> %d\n", kind, !file.isEmpty());
     if (file.isEmpty())
         throwSilent();
@@ -270,8 +456,11 @@ int saveFile(const void *title, const void *name, const std::string *dir, uint64
     const QStringList filters = filtersFor(mask, &patterns);
     QString selected = filters.size() > 1 ? filters.at(1) : filters.value(0);
     const QString initial = QDir(startDir(dir)).filePath(fromTText(name));
-    QString file = QFileDialog::getSaveFileName(dialogParent(), fromTText(title), initial,
-                                                filters.join(QStringLiteral(";;")), &selected, dialogOptions());
+    QString file = [&] {
+        LiveTicks ticks;
+        return QFileDialog::getSaveFileName(dialogParent(), fromTText(title), initial,
+                                            filters.join(QStringLiteral(";;")), &selected, dialogOptions());
+    }();
     menufixTrace("filedialogs: save -> %d\n", !file.isEmpty());
     if (file.isEmpty())
         throwSilent();
@@ -295,8 +484,11 @@ int saveFile(const void *title, const void *name, const std::string *dir, uint64
 
 std::string *chooseFolder(std::string *result, const void *title, const std::string *dir, bool)
 {
-    const QString folder = QFileDialog::getExistingDirectory(dialogParent(), fromTText(title), startDir(dir),
-                                                             QFileDialog::ShowDirsOnly | dialogOptions());
+    const QString folder = [&] {
+        LiveTicks ticks;
+        return QFileDialog::getExistingDirectory(dialogParent(), fromTText(title), startDir(dir),
+                                                 QFileDialog::ShowDirsOnly | dialogOptions());
+    }();
     menufixTrace("filedialogs: folder -> %d\n", !folder.isEmpty());
     if (folder.isEmpty())
         throwSilent();
@@ -335,6 +527,8 @@ bool registerDialogs()
 
 void installFileDialogs()
 {
+    if (!setAddresses())
+        return;
     if (qEnvironmentVariable("LIVE_NATIVE_DIALOGS") == QLatin1String("0"))
         return;
     base = mainExecutableBase();

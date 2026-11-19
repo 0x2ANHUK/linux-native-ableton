@@ -12,13 +12,15 @@
 //     Wayland plug-in), desktop file dialogs through xdg-desktop-portal
 //     (LIVE_NATIVE_DIALOGS=0: Live's own);
 //   - LC_NUMERIC=C: Live reads Live Set numbers with the locale's strtod;
-//   - LIVEDEBUGOPTIONS: Options-desktop.txt next to push3_opt/;
+//   - LIVEDEBUGOPTIONS: Options-desktop.txt next to push3_opt/ (its lines
+//     -_Live... are this project's settings: -_LiveAudioThreads=<n>);
 //   - HOME: the user's own, as for any Linux program (Live then keeps its
 //     settings in ~/.config/Ableton and ~/.local/share/Ableton, and its
 //     libraries in the desktop's Music folder, XDG_MUSIC_DIR/Ableton), or an
 //     isolated data folder: LIVE_DATA_DIR, or live-home/ next to push3_opt/
 //     when that folder exists (the portable build, a development tree); the
-//     real home then stays in LIVE_USER_HOME;
+//     real home then stays in LIVE_USER_HOME, and XDG_CONFIG_HOME,
+//     XDG_DATA_HOME and XDG_CACHE_HOME point into the data folder too;
 //   - LD_LIBRARY_PATH for Live's helper programs (Ableton Index, Plugin
 //     Scanner, Web Connector), which have no RPATH of their own;
 //   - the KWin rule for plug-in editors (tools/kwin-plugin-rule.sh), run in
@@ -35,6 +37,7 @@
 #include <cstring>
 #include <spawn.h>
 #include <string>
+#include "livebuild.h"
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -42,6 +45,8 @@
 
 extern __attribute__((visibility("hidden"))) bool shimActive; // embedded.cpp
 void menufixTrace(const char *fmt, int a = 0, int b = 0, int c = 0);
+void clearStrayInstance();                       // instance.cpp
+void linkUserThemes(const std::string &app); // userthemes.cpp
 bool patchBytes(uintptr_t at, const unsigned char *expected, const unsigned char *replacement, size_t len,
                 int protection); // hook.cpp
 
@@ -63,23 +68,56 @@ uintptr_t programBase()
 // made in memory for an unmodified Live, before its static constructors:
 //   0x3d56530, 0x3e943d8  plug-in editor position (no drift, no offset)
 //   0x760c9fc             menu window kind Qt::Popup -> Qt::ToolTip
+struct BytePatch {
+    uintptr_t at;
+    int protection;
+    size_t len;
+    unsigned char expected[16], replacement[16];
+};
+
 void applyBytePatches(uintptr_t base)
 {
-    static const struct {
-        uintptr_t at;
-        int protection;
-        size_t len;
-        unsigned char expected[9], replacement[9];
-    } patches[] = {
+    static const BytePatch patches12[] = {
         {0x3d56530, PROT_READ | PROT_EXEC, 1, {0x83}, {0xc3}},
         {0x3e943d8, PROT_READ | PROT_EXEC, 9, {0x8b, 0x4c, 0x24, 0x30, 0x44, 0x8b, 0x44, 0x24, 0x34},
          {0x31, 0xc9, 0x66, 0x90, 0x45, 0x31, 0xc0, 0x66, 0x90}},
         {0x760c9fc, PROT_READ, 1, {0x09}, {0x0d}},
     };
+    // Live 11.3.43:
+    //   0x34b97a0  VST3 plug-ins can be created: AVst3PluginInfo's "available on this
+    //              platform" (vtable 0x7db52c8, slot +0x198) returns false in Live 11's
+    //              Linux build ("VST3: Not available on this platform: <name>", 0x33c4190);
+    //              Live 12's (0x3f9d5b0) returns true. xor eax,eax; ret -> mov al,1; ret.
+    //              Its VST3 scan follows Settings > Plug-Ins (0x1018169 below).
+    //   0x1e72790  VST3 hosting on: a global "plug-in hosting enabled" test compiled to
+    //              return false in Live 11's Linux build; its only callers are VST3 code
+    //              (0x34aa420, 0x34aa980, 0x34b7520, and plug-in creation 0x34b7c10, which
+    //              failed with status 6). Live 12's (0x230ee00) decides from two runtime
+    //              flags and is true on the desktop. xor eax,eax; ret -> mov al,1; ret.
+    //   0x1018169  Settings > Plug-Ins shows the VST3 rows (Use VST3 Plug-In System
+    //              Folders, Use VST3 Plug-In Custom Folder, VST3 Plug-In Custom Folder),
+    //              as Live 12's does: Sources.xml shows them when the page's model has
+    //              Vst3Available (APluginSettingsPreferencesModel +0xf8), which Live 11's
+    //              Linux build sets to false in the model's constructor (0x1017f20). The
+    //              setter call gets true: movq $0,0x68(%rsp) (9 bytes) becomes andq $0
+    //              (6 bytes), and the freed bytes hold inc %esi after xor %esi,%esi. AUv2,
+    //              AUv3 and the VST2 system folders stay hidden, as in Live 12.
+    static const BytePatch patches11[] = {
+        {0x34b97a0, PROT_READ | PROT_EXEC, 3, {0x31, 0xc0, 0xc3}, {0xb0, 0x01, 0xc3}},
+        {0x1e72790, PROT_READ | PROT_EXEC, 3, {0x31, 0xc0, 0xc3}, {0xb0, 0x01, 0xc3}},
+        {0x1018169, PROT_READ | PROT_EXEC, 16,
+         {0x48, 0xc7, 0x44, 0x24, 0x68, 0x00, 0x00, 0x00, 0x00, 0x48, 0x8d, 0x54, 0x24, 0x60, 0x31, 0xf6},
+         {0x48, 0x83, 0x64, 0x24, 0x68, 0x00, 0x48, 0x8d, 0x54, 0x24, 0x60, 0x31, 0xf6, 0xff, 0xc6, 0x90}},
+    };
+    const bool live11 = liveBuild() == LiveBuild::Live11_3_43;
+    if (!live11 && liveBuild() != LiveBuild::Live12_4_7)
+        return;
+    const BytePatch *list = live11 ? patches11 : patches12;
+    const size_t count = live11 ? sizeof patches11 / sizeof *patches11 : sizeof patches12 / sizeof *patches12;
     int done = 0;
-    for (const auto &p : patches)
-        done += patchBytes(base + p.at, p.expected, p.replacement, p.len, p.protection);
-    menufixTrace("standalone: byte patches %d of 3\n", done);
+    for (size_t i = 0; i < count; ++i)
+        done += patchBytes(base + list[i].at, list[i].expected, list[i].replacement, list[i].len, list[i].protection);
+    menufixTrace("standalone: byte patches %d of %d\n", done, int(count));
 }
 
 std::string dirName(const std::string &path)
@@ -154,12 +192,22 @@ void runKwinRule(const std::string &root, const char *userHome)
 // other callers of 0x1b35be0 (window title "Beta", support e-mail address,
 // debug assertions, AutomationCapture's JSON dumps) still get 4, a final
 // release. Checked against the first test's bytes (cmp dword [rip+..], 4).
+// Live 11.3.43 has the same checks in its own view (LWindow::AMainView:
+// paintEvent 0x1b9abc0, test at 0x1b9ac22) on its copy at 0x81955d0, guard
+// 0x81955d8, filled from 0x1640120; without this its window stays blank.
 void selectDesktopViews(uintptr_t base)
 {
-    const unsigned char check[] = {0x83, 0x3d, 0xdd, 0x71, 0xc1, 0x07, 0x04};
-    auto *productType = reinterpret_cast<int32_t *>(base + 0x9c0e638);
-    auto *guard = reinterpret_cast<uint8_t *>(base + 0x9c0e640);
-    if (memcmp(reinterpret_cast<void *>(base + 0x1ff7454), check, sizeof check) != 0 || *guard)
+    const bool live11 = liveBuild() == LiveBuild::Live11_3_43;
+    const unsigned char check12[] = {0x83, 0x3d, 0xdd, 0x71, 0xc1, 0x07, 0x04};
+    const unsigned char check11[] = {0x83, 0x3d, 0xa7, 0xa9, 0x5f, 0x06, 0x04};
+    const uintptr_t test = liveAddress(0x1ff7454, 0x1b9ac22);
+    const uintptr_t copy = liveAddress(0x9c0e638, 0x81955d0);
+    const uintptr_t guardAt = liveAddress(0x9c0e640, 0x81955d8);
+    if (!test)
+        return;
+    auto *productType = reinterpret_cast<int32_t *>(base + copy);
+    auto *guard = reinterpret_cast<uint8_t *>(base + guardAt);
+    if (memcmp(reinterpret_cast<void *>(base + test), live11 ? check11 : check12, sizeof check12) != 0 || *guard)
         return;
     *productType = 0;
     *guard = 1;
@@ -201,6 +249,13 @@ __attribute__((constructor(102))) void setUpEnvironment()
     if (getenv("LC_ALL") && *getenv("LC_ALL"))
         setenv("LC_ALL", "C.UTF-8", 1);
     unsetenv("FACELESS_ROOT");
+    // An XDG base folder variable that is set but empty means "not set" (XDG
+    // spec). Max took the empty string as a path and Live stopped at start
+    // ("cannot create directories: Invalid argument []"): remove such entries,
+    // so everything falls back to ~/.config, ~/.local/share and ~/.cache.
+    for (const char *name : {"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"})
+        if (const char *value = getenv(name); value && !*value)
+            unsetenv(name);
 
     if (!getenv("LIVEDEBUGOPTIONS")) {
         const std::string options = root + "/Options-desktop.txt";
@@ -209,6 +264,24 @@ __attribute__((constructor(102))) void setUpEnvironment()
                 fputs("-_LinuxMidiBackend=Alsa\n-SuppressStartUpMessages\n-_DisableAutoUpdates\n", f);
                 fclose(f);
             }
+        // Lines starting with "-_Live" are settings of this project (Live ignores
+        // unknown options of that shape): -_LiveAudioThreads=<n> sets
+        // LIVE_AUDIO_THREADS (alsaaudio.cpp) unless the environment has it.
+        if (FILE *f = fopen(options.c_str(), "r")) {
+            char line[256];
+            while (fgets(line, sizeof line, f)) {
+                if (strncmp(line, "-_LiveAudioThreads=", 19) != 0)
+                    continue;
+                std::string value = line + 19;
+                while (!value.empty() && (value.back() == '\n' || value.back() == '\r' || value.back() == ' '))
+                    value.pop_back();
+                if (!value.empty() && value.find_first_not_of("0123456789") == std::string::npos) {
+                    setenv("LIVE_AUDIO_THREADS", value.c_str(), 0);
+                    menufixTrace("standalone: audio worker threads from Options-desktop.txt\n");
+                }
+            }
+            fclose(f);
+        }
         setenv("LIVEDEBUGOPTIONS", options.c_str(), 1);
     }
 
@@ -233,7 +306,21 @@ __attribute__((constructor(102))) void setUpEnvironment()
         if (!data.empty())
             setenv("HOME", data.c_str(), 1);
         if (!userHome.empty())
-            runKwinRule(root, userHome.c_str());
+            runKwinRule(root, userHome.c_str()); // forks now: keeps the session's XDG folders
+        // XDG_CONFIG_HOME, XDG_DATA_HOME and XDG_CACHE_HOME win over HOME (Live,
+        // Qt, Max): set in the session, they took Live's settings, licence,
+        // database and caches out of the isolated folder. Point them into it.
+        if (!data.empty()) {
+            setenv("XDG_CONFIG_HOME", (data + "/.config").c_str(), 1);
+            setenv("XDG_DATA_HOME", (data + "/.local/share").c_str(), 1);
+            setenv("XDG_CACHE_HOME", (data + "/.cache").c_str(), 1);
+        }
+    }
+
+    // Live itself, not the programs it starts (they load the shim too).
+    if (!strcmp(exe + app.size(), "/Live")) {
+        clearStrayInstance(); // instance.cpp
+        linkUserThemes(app);  // userthemes.cpp
     }
 
     if (chdir(app.c_str()) != 0)
@@ -270,6 +357,58 @@ bool isRegistration(const char *program)
     return (len == 16 && !strncmp(name, "xdg-desktop-menu", len)) || (len == 8 && !strncmp(name, "xdg-mime", len));
 }
 
+// Live starts the Push 3 companion (Push3) by itself whenever Push hardware is
+// connected. Live passes --show-developer-window, which the image's device build
+// of Push3 does not have: Push3 answers "Invalid arguments: unrecognised option
+// '--show-developer-window'" and exits before it touches the hardware (PR #4).
+// That option is left out of the companion's command line (--language, which
+// PR #4 drops too, is accepted by this Push3 and stays). The
+// filtered copy lives on the caller's stack: in a forked child before exec only
+// async-signal-safe work is allowed (no malloc, no logging).
+bool isCompanion(const char *path)
+{
+    if (!shimActive || !path)
+        return false;
+    const char *name = strrchr(path, '/');
+    name = name ? name + 1 : path;
+    return strcmp(name, "Push3") == 0;
+}
+
+bool droppedCompanionOption(const char *arg)
+{
+    static const char *const unsupported[] = {"--show-developer-window"};
+    for (const char *option : unsupported) {
+        const size_t len = strlen(option);
+        if (!strncmp(arg, option, len) && (arg[len] == '\0' || arg[len] == '='))
+            return true;
+    }
+    return false;
+}
+
+constexpr size_t kCompanionArgs = 128;
+
+// argv without the unsupported options in out[] (at most kCompanionArgs - 1
+// arguments), or null when nothing is dropped or the list is too long.
+char *const *companionArgs(const char *path, char *const argv[], char **out, size_t *dropped = nullptr)
+{
+    if (!argv || !isCompanion(path))
+        return nullptr;
+    size_t n = 0, kept = 0;
+    for (; argv[n]; ++n) {
+        if (droppedCompanionOption(argv[n]))
+            continue;
+        if (kept + 1 >= kCompanionArgs)
+            return nullptr;
+        out[kept++] = argv[n];
+    }
+    if (kept == n)
+        return nullptr;
+    out[kept] = nullptr;
+    if (dropped)
+        *dropped = n - kept;
+    return out;
+}
+
 // The program itself, or a shell running it: sh -c "xdg-mime install ...".
 bool runsRegistration(const char *path, char *const argv[])
 {
@@ -292,7 +431,9 @@ extern "C" int execv(const char *path, char *const argv[])
     static auto next = real<int (*)(const char *, char *const[])>("execv", "GLIBC_2.2.5");
     if (runsRegistration(path, argv))
         _exit(0); // in Live's child process, before the exec
-    return next(path, argv);
+    char *buf[kCompanionArgs];
+    char *const *args = companionArgs(path, argv, buf);
+    return next(path, args ? args : argv);
 }
 
 extern "C" int execve(const char *path, char *const argv[], char *const envp[])
@@ -300,7 +441,9 @@ extern "C" int execve(const char *path, char *const argv[], char *const envp[])
     static auto next = real<int (*)(const char *, char *const[], char *const[])>("execve", "GLIBC_2.2.5");
     if (runsRegistration(path, argv))
         _exit(0);
-    return next(path, argv, envp);
+    char *buf[kCompanionArgs];
+    char *const *args = companionArgs(path, argv, buf);
+    return next(path, args ? args : argv, envp);
 }
 
 // A spawned process has to exist (the caller waits for it): `true` runs instead.
@@ -312,7 +455,12 @@ extern "C" int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_
     static char *const trueArgv[] = {const_cast<char *>("true"), nullptr};
     if (runsRegistration(path, argv))
         return next(pid, "/bin/true", actions, attr, trueArgv, envp);
-    return next(pid, path, actions, attr, argv, envp);
+    char *buf[kCompanionArgs];
+    size_t dropped = 0;
+    char *const *args = companionArgs(path, argv, buf, &dropped);
+    if (args)
+        menufixTrace("standalone: Push companion started without %d option(s)\n", int(dropped));
+    return next(pid, path, actions, attr, args ? args : argv, envp);
 }
 
 extern "C" int posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file_actions_t *actions,
@@ -323,7 +471,12 @@ extern "C" int posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file
     static char *const trueArgv[] = {const_cast<char *>("true"), nullptr};
     if (runsRegistration(file, argv))
         return next(pid, "true", actions, attr, trueArgv, envp);
-    return next(pid, file, actions, attr, argv, envp);
+    char *buf[kCompanionArgs];
+    size_t dropped = 0;
+    char *const *args = companionArgs(file, argv, buf, &dropped);
+    if (args)
+        menufixTrace("standalone: Push companion started without %d option(s)\n", int(dropped));
+    return next(pid, file, actions, attr, args ? args : argv, envp);
 }
 
 extern "C" int system(const char *command)

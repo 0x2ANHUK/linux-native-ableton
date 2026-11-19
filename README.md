@@ -11,13 +11,47 @@ This project is not affiliated with or endorsed by Ableton. Licensing is not tou
 
 <br>
 
-## Requirements
+## New in the last update
 
-### IMPORTANT: Due to this binary being compiled specifically for Push 3, which runs 11th Gen Intel CPU, it is restricted to AVX-512 instructions. Said instructions currently run only on <u>AMD Ryzen 7000 series</u> and above, and <u>Intel Core 10th and 11th Gen</u>.
+**Live 11**
+- The installer now also sets up **Live 11.3.43** (from the Push 3 recovery image 1.2.23 and the Live 11.3.43 Suite installer), side by side with Live 12. Each version has its own install folder, menu entry and launcher. Live 12 stays the default.
+- One shim serves both versions: it recognises the Live build and uses that build's addresses. A fix not ported to Live 11 stays off there.
+- On Live 11: its own menu bar styled like Live 12's, window size and zoom, pointer and cursor fixes, VST3 plug-ins with editor windows, and JACK.
+- Live 11's installer is a WiX bundle and needs `cabextract` and `python3`.
+
+**CPUs without AVX-512**
+- On CPUs with AVX2 but without AVX-512 (Intel Core 4th gen and newer, AMD Ryzen 1000 and newer), Live runs through the bundled AVX-512 emulator (`shim/libavx512emu.so`). It translates Live's AVX-512 instructions to AVX2 in memory, so Live's files stay unchanged. Expect somewhat more CPU use (about 14 % on the Live 12 demo Set).
+- CPUs with only part of the AVX-512 Live needs (Intel Skylake-X, Cascade Lake, Cooper Lake, Xeon W) use the emulator too. Live is shown no AVX-512 there, and all of its AVX-512 code is translated at start (about 3 s longer start).
+- The installer checks the CPU and picks the version. `--cpu avx512` or `--cpu avx2` chooses it yourself; `LIVE_AVX512EMU=0` turns the emulator off and `=1` forces it on.
+
+**Installer**
+- No options needed: it asks for the Live version (12 or 11), a normal or portable installation, and the install folder. Each has a default you take with Enter. It shows your choices before it starts.
+- **Portable version**: program, settings, licence and libraries all in one folder that you can move or copy, also to another computer.
+- It refuses a folder with other files in it, your home folder and system folders, and it does not mix the two Live versions in one folder.
+- The uninstaller deletes only what the installer put there. Uninstallers from older installers deleted everything in the install folder: run `install.sh` again before you uninstall to get the new one.
+- `.auz` offline authorization files open in Live.
+
+**Audio**
+- Settings > Audio > Driver Type offers **PipeWire** (default, shares the sound card with the desktop), **ALSA** (exclusive use of the card, lowest latency) and **JACK**. Each type keeps its own devices.
+- Fixed: System Default failing when the desktop has no default input; a mono microphone making Live's output mono.
+- New variables: `LIVE_AUDIO_THREADS`, `LIVE_ALSA_PERIODS`, `LIVE_ALSA_MINRING`, `LIVE_JACK_CONNECT`, `LIVE_JACK_INPUTS`, `LIVE_JACK_OUTPUTS`, `LIVE_AUDIO_DRIVERS=0`.
+
+**Push, Max for Live, themes**
+- Push 2 and Push 3 run through the Push 3 companion program, as on a standalone Push 3. The installer offers a udev rule for USB access. Not tested here (no Push hardware).
+- Max for Live device interfaces are hidden in Clip view and over a collapsed detail area, and placed and scaled correctly at desktop scales other than 100 %. `LIVE_MAX_VIEWS=0` turns this off.
+- Your own themes: put `.ask` files into `~/.local/share/Ableton/Themes/Live 12/` (Live 11: `Themes/Live 11/`) and restart Live.
+
+**Fixes**
+- Instruments, Audio Effects, MIDI Effects, Modulators and Max for Live were empty in the browser with the default install folder (Live skips paths with a hidden folder such as `.local`).
+- Live's display stood still while a file dialog was open.
+- After a crash, Live could start as a second instance ("Can't access file database", no New Folder or Delete in the browser).
+- Export Audio of many or long tracks failed with "No space left on device": its temporary files now go to `~/.cache/Ableton/Temp` on disk instead of RAM (`LIVE_TEMP_DIR` chooses another folder).
+- Live crashed at start when `XDG_CONFIG_HOME`, `XDG_DATA_HOME` or `XDG_CACHE_HOME` was set but empty.
+- The portable version keeps its data in its own folder, also when `XDG_*_HOME` variables are set in your session.
 
 <br>
 
-Other requirements:
+## Requirements
 - An x86-64 PC with PipeWire, and glibc 2.35 or newer (Ubuntu 22.04, Mint 21, Debian 12, Fedora 36 or newer).
 - An X11 session or Xwayland. Every mainstream desktop has one; Live runs as an X11 program.
 - About 25 GB of free space while installing, and about 7 GB after (4.5 GB program, 2.1 GB Core Library).
@@ -28,12 +62,12 @@ Other requirements:
 
 | Distribution | Command |
 |---|---|
-| Arch, Manjaro, EndeavourOS, CachyOS | `sudo pacman -S --needed unzip e2fsprogs pipewire-alsa` |
-| Debian 12+, Ubuntu 22.04+, Mint 21+ | `sudo apt install unzip e2fsprogs pipewire-alsa` |
-| Fedora | `sudo dnf install unzip e2fsprogs pipewire-alsa` |
-| openSUSE | `sudo zypper install unzip e2fsprogs pipewire-alsa` |
+| Arch, Manjaro, EndeavourOS, CachyOS | `sudo pacman -S --needed unzip e2fsprogs cabextract python pipewire-alsa` |
+| Debian 12+, Ubuntu 22.04+, Mint 21+ | `sudo apt install unzip e2fsprogs cabextract python3 pipewire-alsa` |
+| Fedora | `sudo dnf install unzip e2fsprogs cabextract python3 pipewire-alsa` |
+| openSUSE | `sudo zypper install unzip e2fsprogs cabextract python3 pipewire-alsa` |
 
-You do not need to install `innoextract`. The installer brings its own (see [innoextract](#innoextract)).
+The commands cover Live 12 and Live 11 (`cabextract` and `python3` are only for Live 11's installer). You do not need to install `innoextract`. The installer brings its own (see [innoextract](#innoextract)).
 
 <br>
 
@@ -57,6 +91,11 @@ You do not need to install `innoextract`. The installer brings its own (see [inn
 
    - the Push 3 recovery image 2.4.7, available [here](https://cdn-downloads.ableton.com/hardware_updates/push3/2.4.7/Push3-RecoveryImage-2.4.7.zip)
    - the Windows installer of Live 12.4.7 Suite, available [here](https://cdn-downloads.ableton.com/channels/12.4.7/ableton_live_suite_12.4.7_64.zip)
+
+   If you want to run Live 11:
+
+   - the Push 3 recovery image 1.2.23, available [here](https://cdn-downloads.ableton.com/hardware_updates/push3/1.2.23/Push3-RecoveryImage-1.2.23.zip)
+   - the Windows installer of Live 11.3.43 Suite, available [here](https://cdn-downloads.ableton.com/channels/11.3.43/ableton_live_suite_11.3.43_64.zip)
 
    You can also access them on https://www.ableton.com/en/download/archive/ (but you need an account to download it from there).
 4. Put both zips into the same folder, next to `install.sh`.

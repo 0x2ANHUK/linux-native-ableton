@@ -35,6 +35,7 @@
 // clicking Live's main window buries the editor behind it. The editor
 // windows (seen by pluginclose.cpp's XCreateWindow interposer) are made
 // transient for Live's active main window, with Live's window class and icon.
+#include "livebuild.h"
 #include <QApplication>
 #include <QDir>
 #include <QIcon>
@@ -191,18 +192,23 @@ QSize workAreaSize(QWidget *w)
     return nativeWorkArea(screen).size() / w->devicePixelRatioF() - frame;
 }
 
+// Live 11.3.43: SetZoom 0x1c58910 (same arguments; zoom state at AWindow +
+// 0xa0, zoom at + 0xdc, scale virtual + 0x5a8, minimum size the same + 0x200).
 constexpr uintptr_t kSetZoom = 0x20c4110; // (window zoom state *, float zoom)
+constexpr uintptr_t kSetZoom11 = 0x1c58910;
 const unsigned char kSetZoomPrologue[] = {0x55, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
                                           0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x68};
+const unsigned char kSetZoomPrologue11[] = {0x55, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
+                                            0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x58};
 using SetZoomFn = void (*)(void *, float);
 
 // AWindow (a window's view manager): minimum size in Live's units, packed
 // w | h << 32 (the maximum is the next slot); the window's scale (Live's
 // units to pixels before zoom); the zoom at zoom state (+0xf0) + 0xd4.
 constexpr size_t kMinimumSizeSlot = 0x200;
-constexpr size_t kScaleSlot = 0x588;
-constexpr size_t kZoomState = 0xf0;
-constexpr size_t kZoom = 0xd4;
+size_t kScaleSlot = 0x588;
+size_t kZoomState = 0xf0;
+size_t kZoom = 0xd4;
 SetZoomFn liveSetZoom;
 int zoomChanging; // depth of SetZoom calls on the GUI thread
 
@@ -269,7 +275,13 @@ void liveWindowPainted(void *viewManager)
     const uint64_t minimum = reinterpret_cast<uint64_t (*)(void *)>(vtable[kMinimumSizeSlot / 8])(viewManager);
     const float scale = reinterpret_cast<float (*)(void *)>(vtable[kScaleSlot / 8])(viewManager);
     const float zoom = *reinterpret_cast<float *>(*reinterpret_cast<char **>(static_cast<char *>(viewManager) + kZoomState) + kZoom);
-    const QSize size = QSize(qRound(int32_t(minimum) * zoom * scale), qRound(int32_t(minimum >> 32) * zoom * scale))
+    // Live 11's menu bar is a QMainWindow menu bar above Live's view (Live 12's
+    // view fills the window): the window's minimum includes it.
+    QSize extra(0, 0); // a default QSize is (-1, -1)
+    if (liveBuild() == LiveBuild::Live11_3_43)
+        if (QWidget *view = static_cast<QMainWindow *>(w)->centralWidget())
+            extra = (w->size() - view->size()).expandedTo(QSize(0, 0));
+    const QSize size = (QSize(qRound(int32_t(minimum) * zoom * scale), qRound(int32_t(minimum >> 32) * zoom * scale)) + extra)
                            .boundedTo(workAreaSize(w));
     if (size.isValid() && size != w->minimumSize()) {
         menufixTrace("window: minimum size %dx%d\n", size.width(), size.height());
@@ -292,7 +304,8 @@ void liveOwnPluginWindow(Display *dpy, Window editor)
     }
     // Own instance name, so a KWin rule can match editors only
     // (tools/kwin-plugin-rule.sh: no minimize button); same class for grouping.
-    XClassHint hint = {const_cast<char *>("ableton-live-plugin"), const_cast<char *>("Ableton Live 12")};
+    XClassHint hint = {const_cast<char *>("ableton-live-plugin"),
+                        const_cast<char *>(liveBuild() == LiveBuild::Live11_3_43 ? "Ableton Live 11" : "Ableton Live 12")};
     XSetClassHint(dpy, editor, &hint);
     setNoMinimize(dpy, editor);
     if (!owner)
@@ -358,12 +371,22 @@ void installWindowIntegration()
     previousHandler = qInstallMessageHandler(messageHandler);
     // WM_CLASS: Qt takes the instance from RESOURCE_NAME and the class from the
     // application name; both are read when the first window is created.
+    // Live 11 gets its own instance name (its desktop entry's StartupWMClass), so
+    // the desktop does not group its windows under Live 12's entry and icon.
     if (!qEnvironmentVariableIsSet("RESOURCE_NAME"))
-        qputenv("RESOURCE_NAME", "ableton-live");
-    QCoreApplication::setApplicationName("Ableton Live 12");
+        qputenv("RESOURCE_NAME", liveBuild() == LiveBuild::Live11_3_43 ? "ableton-live-11" : "ableton-live");
+    QCoreApplication::setApplicationName(liveBuild() == LiveBuild::Live11_3_43 ? "Ableton Live 11" : "Ableton Live 12");
     setAppIcon();
     qApp->installEventFilter(new WindowFilter);
-    liveSetZoom = reinterpret_cast<SetZoomFn>(hookFunction(mainBase() + kSetZoom, kSetZoomPrologue,
+    if (liveBuild() == LiveBuild::Live12_4_7)
+        liveSetZoom = reinterpret_cast<SetZoomFn>(hookFunction(mainBase() + kSetZoom, kSetZoomPrologue,
                                                            sizeof kSetZoomPrologue, reinterpret_cast<void *>(&setZoom)));
+    if (liveBuild() == LiveBuild::Live11_3_43) {
+        kScaleSlot = 0x5a8;
+        kZoomState = 0xa0;
+        kZoom = 0xdc;
+        liveSetZoom = reinterpret_cast<SetZoomFn>(hookFunction(mainBase() + kSetZoom11, kSetZoomPrologue11,
+                                                           sizeof kSetZoomPrologue11, reinterpret_cast<void *>(&setZoom)));
+    }
     menufixTrace("window: zoom hook %d\n", liveSetZoom != nullptr);
 }

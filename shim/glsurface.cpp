@@ -3,6 +3,7 @@
 // which executes the frame's render commands in software into the view's
 // QImage, then blits that QImage with QPainter. This file takes over the
 // handler so the present step can be measured and replaced.
+#include "livebuild.h"
 #include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QHash>
@@ -262,6 +263,8 @@ extern "C" void _ZN7QWidget6updateERK5QRect(QWidget *w, const QRect &rect)
 // Always on (not a diagnostic).
 void installFrameBufferHook()
 {
+    if (liveBuild() != LiveBuild::Live12_4_7)
+        return; // not ported to this Live build yet
     const uintptr_t b = mainBase();
     liveResizeFrameBuffer = reinterpret_cast<ResizeFrameBufferFn>(hookFunction(
         b + kResizeFrameBuffer, kResizeFrameBufferPrologue, sizeof kResizeFrameBufferPrologue,
@@ -274,6 +277,8 @@ void installFrameBufferHook()
 
 void installPaintHook()
 {
+    if (liveBuild() != LiveBuild::Live12_4_7)
+        return; // not ported to this Live build yet
     if (!getenv("LIVE_PAINT_HOOK"))
         return;
     base = mainBase();

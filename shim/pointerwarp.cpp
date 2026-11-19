@@ -57,6 +57,7 @@
 // and moves the root position to agree with mapToGlobal() (see below).
 //
 // LIVE_WARP_TRACE=1 (with MENUFIX_DEBUG) logs every read and move.
+#include "livebuild.h"
 #include <QAbstractNativeEventFilter>
 #include <QCoreApplication>
 #include <QCursor>
@@ -76,13 +77,22 @@ bool redirectFunction(uintptr_t fn, const unsigned char *prologue, size_t len, v
 
 namespace {
 
-constexpr uintptr_t kGetPosition = 0x1fe4fe0; // () -> x | y << 32
-constexpr uintptr_t kSetPosition = 0x1fe4f00; // (platform *, x | y << 32)
-constexpr uintptr_t kPointerDisabled = 0x20506a0; // Live's own guard in set-position
+// Live 11.3.43 has the same two functions in its X11 layer (LX11Cursor):
+// get-position 0x1b8eb80 ("x11: failed to retrieve the mouse position") and
+// set-position 0x1b8ea70 ("x11: failed to set the mouse position"), same
+// arguments, guarded by 0x1be5e40. Its view runs at Qt's ratio too, with the
+// same jump on a scaled desktop (tempo dragged 20 px at 125 %: 120 -> 209).
+uintptr_t kGetPosition = 0x1fe4fe0; // () -> x | y << 32
+uintptr_t kSetPosition = 0x1fe4f00; // (platform *, x | y << 32)
+uintptr_t kPointerDisabled = 0x20506a0; // Live's own guard in set-position
 const unsigned char kGetPositionPrologue[] = {0x41, 0x56, 0x53, 0x48, 0x83, 0xec, 0x38,
                                               0xc7, 0x44, 0x24, 0x0c, 0x00, 0x00, 0x00, 0x00};
 const unsigned char kSetPositionPrologue[] = {0x55, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
                                               0x41, 0x54, 0x53, 0x50, 0x48, 0x89, 0xf3};
+const unsigned char kGetPositionPrologue11[] = {0x41, 0x56, 0x53, 0x48, 0x83, 0xec, 0x38,
+                                                0x64, 0x48, 0x8b, 0x04, 0x25, 0x28, 0x00, 0x00};
+const unsigned char kSetPositionPrologue11[] = {0x55, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
+                                                0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x18};
 
 uintptr_t base;
 QPointF warpError; // the last warp's exact target minus the X pixel it landed on
@@ -221,11 +231,23 @@ uintptr_t mainBase()
 
 void installPointerWarp()
 {
+    const bool live11 = liveBuild() == LiveBuild::Live11_3_43;
+    if (!live11 && liveBuild() != LiveBuild::Live12_4_7)
+        return; // not ported to this Live build
     base = mainBase();
-    const bool get = redirectFunction(base + kGetPosition, kGetPositionPrologue, sizeof kGetPositionPrologue,
-                                      reinterpret_cast<void *>(&getPosition));
-    const bool set = redirectFunction(base + kSetPosition, kSetPositionPrologue, sizeof kSetPositionPrologue,
-                                      reinterpret_cast<void *>(&setPosition));
+    if (live11) {
+        kGetPosition = 0x1b8eb80;
+        kSetPosition = 0x1b8ea70;
+        kPointerDisabled = 0x1be5e40;
+    }
+    const bool get = live11 ? redirectFunction(base + kGetPosition, kGetPositionPrologue11, sizeof kGetPositionPrologue11,
+                                               reinterpret_cast<void *>(&getPosition))
+                            : redirectFunction(base + kGetPosition, kGetPositionPrologue, sizeof kGetPositionPrologue,
+                                               reinterpret_cast<void *>(&getPosition));
+    const bool set = live11 ? redirectFunction(base + kSetPosition, kSetPositionPrologue11, sizeof kSetPositionPrologue11,
+                                               reinterpret_cast<void *>(&setPosition))
+                            : redirectFunction(base + kSetPosition, kSetPositionPrologue, sizeof kSetPositionPrologue,
+                                               reinterpret_cast<void *>(&setPosition));
     static PositionRounder rounder;
     int opcode, event, error;
     if (display() && XQueryExtension(display(), "XInputExtension", &opcode, &event, &error)) {

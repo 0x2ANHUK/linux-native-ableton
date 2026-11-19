@@ -3,7 +3,7 @@
    QWidget::resize (window.cpp), QWidget::update(QRect) (glsurface.cpp), QDrag::exec (dragcursor.cpp), snd_seq_event_input (alsamidi.cpp),
    snd_pcm_open, snd_pcm_hw_params_set_format_mask, snd_pcm_hw_params_set_channels
    and snd_pcm_hw_params_set_buffer_size (alsaaudio.cpp), the card scan
-   functions, stat and stat64 (pwdevices.cpp), execv, execve, system, posix_spawn and posix_spawnp (standalone.cpp). */
+   functions, stat and stat64 (pwdevices.cpp), snd_pcm_close, snd_pcm_hw_params, snd_pcm_avail_update, snd_pcm_mmap_begin/commit and snd_pcm_prepare (jackaudio.cpp), snd_pcm_hw_params_get_format (alsaaudio.cpp, ALSA_0.9.0rc4), execv, execve, system, posix_spawn and posix_spawnp (standalone.cpp), bind (instance.cpp). */
 Qt_5 {
     global: _ZN7QWidget6resizeERK5QSize; _ZN7QWidget6updateERK5QRect; _ZN5QDrag4execE6QFlagsIN2Qt10DropActionEE;
 };
@@ -12,12 +12,17 @@ ALSA_0.9 {
         snd_pcm_hw_params_set_buffer_size;
         snd_card_next; snd_ctl_open; snd_ctl_close; snd_ctl_card_info; snd_ctl_card_info_get_name;
         snd_ctl_pcm_next_device; snd_ctl_pcm_info; snd_pcm_info_get_name;
+        snd_pcm_close; snd_pcm_hw_params; snd_pcm_avail_update;
+        snd_pcm_mmap_begin; snd_pcm_mmap_commit; snd_pcm_prepare;
+};
+ALSA_0.9.0rc4 {
+    global: snd_pcm_hw_params_get_format;
 };
 GLIBC_2.33 {
     global: stat; stat64;
 };
 GLIBC_2.2.5 {
-    global: execv; execve; system;
+    global: execv; execve; system; bind;
 };
 GLIBC_2.15 {
     global: posix_spawn; posix_spawnp;

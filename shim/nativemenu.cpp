@@ -18,16 +18,20 @@
 // LIVE_NATIVE_MENU=0 turns it off.
 //
 // Addresses are file-relative virtual addresses in AbletonLive12 (PIE).
+#include "livebuild.h"
 #include <QApplication>
 #include <QFontMetrics>
 #include <QMainWindow>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPointer>
+#include <QLayout>
 #include <QResizeEvent>
 #include <QTimer>
 #include <QVariant>
 #include <link.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -343,10 +347,15 @@ QString itemPadding(int bandHeight)
 // (GetTheme, GetColor). Desktop is the colour of the menu band,
 // SurfaceBackground of panels, ControlForeground and TextDisabled of text.
 // Ids are the entries of Live's colour name table (0x9c0f220).
-constexpr uintptr_t kGetTheme = 0x2260750; // () -> ATheme *, created on first use
-constexpr uintptr_t kGetColor = 0x2260840; // (ATheme *, id) -> ARGB
+// Live 11.3.43: GetTheme 0x1dc47d0, GetColor 0x1dc4860 (out *, ATheme *, id): the
+// same ids (3, 6, 11, 212, checked against its themes' files at runtime), the
+// colour table at ATheme + 0x10b0, ARGB.
+uintptr_t kGetTheme = 0x2260750; // () -> ATheme *, created on first use
+uintptr_t kGetColor = 0x2260840; // (ATheme *, id) -> ARGB
 const unsigned char kGetThemePrologue[] = {0x53, 0x48, 0x83, 0xec, 0x10};
 const unsigned char kGetColorPrologue[] = {0x48, 0x63, 0xc6, 0x48, 0x8b, 0x8f, 0x78, 0x12, 0x00, 0x00};
+const unsigned char kGetThemePrologue11[] = {0x50, 0x48, 0x8b, 0x05, 0xd0, 0xa2, 0x3e, 0x06, 0x48, 0x85, 0xc0};
+const unsigned char kGetColorPrologue11[] = {0x48, 0x89, 0xf8, 0x48, 0x63, 0xca, 0x48, 0x8b, 0x96, 0xb0, 0x10, 0x00, 0x00};
 constexpr int kDesktop = 3;
 constexpr int kSurfaceBackground = 6;
 constexpr int kControlForeground = 11;
@@ -358,11 +367,14 @@ constexpr int kTextDisabled = 212;
 // (0x14b6620, notifier -> calls every listener), which is how Live's own
 // views learn of it. The hook passes every Notify on and only looks at the
 // theme's.
-constexpr uintptr_t kTheme = 0x9c29828;         // ATheme *, GetTheme's instance
-constexpr uintptr_t kThemeOverride = 0x9c29820; // ATheme *, returned instead when set
-constexpr size_t kThemeNotifier = 0x1668;
-constexpr uintptr_t kNotify = 0x14b6620; // (notifier)
+// Live 11.3.43: instance 0x81aeab0, override 0x81aeaa8, notifier ATheme + 0x1560
+// (notified from 0x1df8a70, its recompute), Notify 0x1a1b390.
+uintptr_t kTheme = 0x9c29828;         // ATheme *, GetTheme's instance
+uintptr_t kThemeOverride = 0x9c29820; // ATheme *, returned instead when set
+size_t kThemeNotifier = 0x1668;
+uintptr_t kNotify = 0x14b6620; // (notifier)
 const unsigned char kNotifyPrologue[] = {0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x30};
+const unsigned char kNotifyPrologue11[] = {0x41, 0x57, 0x41, 0x56, 0x41, 0x54, 0x53, 0x50, 0x48, 0x89, 0xfb, 0x48, 0x8b, 0x07};
 
 // Live's views (AView): the rectangle {left, top, right, bottom} at +0x30, in
 // the window's pixels after zoom (0x20ac7b0 reads it so); the children as a
@@ -392,7 +404,14 @@ bool themeHooked; // restyle on Live's theme changes
 ThemeColours themeColours()
 {
     void *theme = live<void *(*)()>(kGetTheme)();
-    auto colour = [theme](int id) { return QColor::fromRgb(live<QRgb (*)(void *, int)>(kGetColor)(theme, id)); };
+    auto colour = [theme](int id) {
+        if (liveBuild() == LiveBuild::Live11_3_43) {
+            QRgb argb = 0;
+            live<void (*)(QRgb *, void *, int)>(kGetColor)(&argb, theme, id);
+            return QColor::fromRgb(argb);
+        }
+        return QColor::fromRgb(live<QRgb (*)(void *, int)>(kGetColor)(theme, id));
+    };
     return {colour(kDesktop), colour(kSurfaceBackground), colour(kControlForeground), colour(kTextDisabled)};
 }
 
@@ -556,6 +575,8 @@ template <typename Fn> void coalesce(std::atomic<bool> &pending, Fn fn)
 
 std::atomic<bool> themePending;
 
+void restyleAll11(); // Live 11.3.43, below
+
 using NotifyFn = void (*)(void *);
 NotifyFn liveNotify;
 
@@ -568,6 +589,8 @@ void notify(void *notifier)
     if (!theme || reinterpret_cast<uintptr_t>(notifier) != theme + kThemeNotifier)
         return;
     coalesce(themePending, [] {
+        if (liveBuild() == LiveBuild::Live11_3_43)
+            return restyleAll11();
         for (QWidget *view : viewsWithBar())
             restyle(barOf(view));
     });
@@ -685,11 +708,188 @@ void *hookFunction(uintptr_t fn, const unsigned char *prologue, size_t len, void
 bool redirectFunction(uintptr_t fn, const unsigned char *prologue, size_t len, void *target);    // hook.cpp
 extern bool livePaintHooked; // glsurface.cpp: its diagnostic handler calls livePainted
 
+namespace {
+
+// Live 11.3.43 has a menu bar of its own: LWindow::AMainWindow (a QMainWindow)
+// builds a QMenuBar from its menu tree, and its context menus are QMenus too
+// (Live 12 draws both itself). Both came in Qt's default look (light grey bar,
+// white popups, Qt's font sizes). They get the look this file gives Live 12's
+// menus: the same theme colours and style sheet, the band 24 px x Live's zoom
+// with the same font sizes, restyled on theme and zoom changes. Live 11's menu
+// bar sits above Live's view (the QMainWindow lays it out), so only the band's
+// height follows the zoom; Live lays its view out below it.
+//
+// Live 11's window view (LWindow::AMainView, vtable 0x7b9b3f0) paints in its
+// paintEvent (slot 30, 0x1b9abc0): view + 0x30 is Live's window object, whose
+// + 0x80 is the view manager (AWindow, OnPaintEvent 0x1c5b580); the manager's
+// zoom state at + 0xa0 holds the zoom at + 0xdc (GetZoom 0x1c588d0). The slot
+// gets a wrapper that runs Live's paintEvent, then does what livePainted does.
+constexpr uintptr_t kMainViewPaintSlot11 = 0x7b9b3f0 + 30 * 8;
+constexpr uintptr_t kMainViewPaint11 = 0x1b9abc0;
+constexpr size_t kViewWindow11 = 0x30, kWindowViewManager11 = 0x80, kZoomState11 = 0xa0, kZoom11 = 0xdc;
+constexpr int kBand11 = 22 + kBandMargin; // Live 12's menu band in Live's units
+// Live 11 lays its view out with a margin of 9 units above the toolbar (9 px at
+// 100 %, 17 px at 150 % on a 125 % desktop); Live 12's toolbar sits right under
+// its menu band. A Live 11 menu bar of Live 12's height left twice Live 12's
+// space between the menu titles and the toolbar (toolbar at y 61 instead of 52
+// at 100 %). The bar is shorter by that margin instead, with the titles at
+// Live 12's height in it, so the toolbar lands where Live 12 has it.
+constexpr int kViewTopMargin11 = 9;
+constexpr int kBar11 = kBand11 - kViewTopMargin11;
+using PaintEventFn = void (*)(void *, void *);
+PaintEventFn liveMainViewPaint11;
+int band11;      // Live 12's band height at the window's zoom, px: font and colours follow it
+int barHeight11; // height of Live 11's menu bars, px
+
+QMenuBar *ownBar11(QWidget *window)
+{
+    return window ? window->findChild<QMenuBar *>(QString(), Qt::FindDirectChildrenOnly) : nullptr;
+}
+
+void styleMenu11(QMenu *menu)
+{
+    const QString style = styleFor(band11);
+    if (menu->property("liveStyle").toString() != style) {
+        menu->setProperty("liveStyle", style);
+        menu->setStyleSheet(style);
+    }
+}
+
+void styleBar11(QMenuBar *bar)
+{
+    if (!bar)
+        return;
+    bar->setProperty("liveBand", band11);
+    QFont font = QApplication::font();
+    font.setPixelSize(barFontSize(band11));
+    // Titles as high as in Live 12's band (its top padding), the rest of the
+    // shorter bar below them.
+    const int centred = qMax(0, (itemRowHeight(band11) - QFontMetrics(font).height()) / 2);
+    const int step = qMax(1, qRound(band11 / 24.0));
+    // QMenuBar hides a title whose item is taller than the bar, so the top
+    // padding gives way first.
+    const int line = QFontMetrics(font).height();
+    const int top = qBound(0, centred - 2 * step, qMax(0, barHeight11 - line));
+    const int bottom = qMax(0, barHeight11 - line - top);
+    const QString style = styleFor(band11)
+        + QStringLiteral("QMenuBar::item { padding: %1px %2px %3px; }\n").arg(top).arg(qRound(band11 * 8.0 / 24)).arg(bottom);
+    if (bar->property("liveStyle").toString() != style) {
+        bar->setProperty("liveStyle", style);
+        bar->setStyleSheet(style);
+    }
+    QFont barFont = bar->font();
+    barFont.setPixelSize(barFontSize(band11));
+    bar->setFont(barFont);
+    if (bar->height() == barHeight11 && bar->minimumHeight() == barHeight11)
+        return;
+    bar->setFixedHeight(barHeight11);
+    // Live 11 takes its view's size from the main window's resizeEvent
+    // (LWindow::AMainWindow, 0x1b9c6a0: window size minus menuWidget()'s
+    // height); the view itself has no resize handler. A new band height only
+    // changes the view, so Live is told the window's size again once the
+    // QMainWindow's layout has placed the view.
+    if (QWidget *window = bar->parentWidget()) {
+        if (window->layout())
+            window->layout()->activate();
+        QResizeEvent resize(window->size(), window->size());
+        QCoreApplication::sendEvent(window, &resize);
+    }
+}
+
+void restyleAll11()
+{
+    if (band11 <= 0)
+        return;
+    for (QWidget *w : QApplication::topLevelWidgets())
+        if (qobject_cast<QMainWindow *>(w))
+            styleBar11(ownBar11(w));
+    for (QWidget *w : QApplication::allWidgets())
+        if (auto *menu = qobject_cast<QMenu *>(w))
+            styleMenu11(menu);
+}
+
+void mainViewPaint11(void *self, void *event)
+{
+    liveMainViewPaint11(self, event);
+    auto *window = *reinterpret_cast<char **>(static_cast<char *>(self) + kViewWindow11);
+    void *viewManager = window ? *reinterpret_cast<void **>(window + kWindowViewManager11) : nullptr;
+    if (!viewManager)
+        return;
+    liveWindowPainted(viewManager);
+    const float zoom = field<float>(field<uintptr_t>(uintptr_t(viewManager), kZoomState11), kZoom11);
+    const int band = qRound(kBand11 * zoom);
+    QMenuBar *bar = ownBar11(static_cast<QWidget *>(self)->window());
+    if (band <= 0 || !bar || (band == band11 && bar->property("liveBand").toInt() == band))
+        return;
+    band11 = band;
+    barHeight11 = qRound(kBar11 * zoom);
+    menufixTrace("nativemenu: band %d px, bar %d px (Live 11)\n", band, barHeight11);
+    QTimer::singleShot(0, bar, [] { restyleAll11(); }); // not from inside the paint event
+}
+
+// Popups Live 11 makes later (context menus, menu bar popups) get the style
+// before they are first laid out.
+class MenuStyler11 : public QObject
+{
+public:
+    bool eventFilter(QObject *o, QEvent *e) override
+    {
+        if ((e->type() == QEvent::Polish || e->type() == QEvent::Show) && band11 > 0)
+            if (auto *menu = qobject_cast<QMenu *>(o))
+                styleMenu11(menu);
+        return false;
+    }
+};
+
+void installMenuStyle11()
+{
+    liveColours = !memcmp(reinterpret_cast<void *>(base + kGetTheme), kGetThemePrologue11, sizeof kGetThemePrologue11)
+                  && !memcmp(reinterpret_cast<void *>(base + kGetColor), kGetColorPrologue11, sizeof kGetColorPrologue11);
+    auto *slot = reinterpret_cast<uintptr_t *>(base + kMainViewPaintSlot11);
+    if (!liveColours || *slot != base + kMainViewPaint11) {
+        menufixTrace("nativemenu: Live 11 code not as expected, off\n");
+        return;
+    }
+    liveNotify = reinterpret_cast<NotifyFn>(
+        hookFunction(base + kNotify, kNotifyPrologue11, sizeof kNotifyPrologue11, reinterpret_cast<void *>(&notify)));
+    themeHooked = liveNotify;
+    liveMainViewPaint11 = reinterpret_cast<PaintEventFn>(base + kMainViewPaint11);
+    const long page = sysconf(_SC_PAGESIZE);
+    auto *start = reinterpret_cast<void *>(uintptr_t(slot) & ~uintptr_t(page - 1));
+    paintHooked = mprotect(start, page, PROT_READ | PROT_WRITE) == 0;
+    if (paintHooked) {
+        *slot = reinterpret_cast<uintptr_t>(&mainViewPaint11);
+        mprotect(start, page, PROT_READ);
+    }
+    menufixTrace("nativemenu: Live 11 theme hook %d, paint hook %d\n", themeHooked, paintHooked);
+    if (!paintHooked)
+        return;
+    qApp->installEventFilter(new MenuStyler11);
+    if (!themeHooked) {
+        auto *timer = new QTimer(qApp);
+        QObject::connect(timer, &QTimer::timeout, [] { restyleAll11(); });
+        timer->start(2000);
+    }
+}
+
+} // namespace
+
 void installNativeMenu()
 {
     if (qgetenv("LIVE_NATIVE_MENU") == "0")
         return;
     base = mainBase();
+    if (liveBuild() == LiveBuild::Live11_3_43) {
+        kGetTheme = 0x1dc47d0;
+        kGetColor = 0x1dc4860;
+        kTheme = 0x81aeab0;
+        kThemeOverride = 0x81aeaa8;
+        kThemeNotifier = 0x1560;
+        kNotify = 0x1a1b390;
+        return installMenuStyle11();
+    }
+    if (liveBuild() != LiveBuild::Live12_4_7)
+        return; // not ported to this Live build
     liveColours = !memcmp(reinterpret_cast<void *>(base + kGetTheme), kGetThemePrologue, sizeof kGetThemePrologue)
                   && !memcmp(reinterpret_cast<void *>(base + kGetColor), kGetColorPrologue, sizeof kGetColorPrologue);
     if (liveColours)
