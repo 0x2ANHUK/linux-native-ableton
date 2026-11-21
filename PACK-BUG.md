@@ -104,23 +104,62 @@ or Live stops at the recovery dialog and never starts the indexer.
 - `Inotify *_rm_watch: Invalid argument` errors in `Indexer.txt` are only ever
   reported for the `Live Recordings/* Temp Project` folders, not for packs.
 
-## Next probe (static, REA)
+## Root cause (verified): pack metadata uses Windows separators
 
-Find where Live decides the scan depth for a pack place. The candidates are
-the two parsers of `Ableton Folder Info`: `Properties.cfg` (pack identity) and
-`Metadata.cfg` (binary metadata map). REA with the Ghidra provider now runs on
-this machine (`JAVA_HOME=/usr/lib/jvm/java-25-openjdk`), so:
+A pack's `Ableton Folder Info/Metadata.cfg` stores its folder and file entries as
+UTF-16 strings with **backslashes**:
 
 ```
-rea open-binary $P/push3_opt/push3/products/live/Live/AppLive/... (Live binary)
-rea decompile --procedure <pack place / LibrarySlice scan>
+Ableton Folder Info\Previews\Drums
+Ableton Folder Info\Previews\MIDI Clips\110 - 124 bpm
 ```
 
-Start from the strings `FetchDownloadablePackListFromWeb`,
-`DefaultPackInstallationAppStartupHook`, `Properties.cfg`, `ScannerVersion`
-(seen in the `Metadata.cfg` header) and walk to the directory reader.
+The Core Library's `Metadata.cfg` uses forward slashes, and so does everything
+Live writes itself:
 
-## Superseded probe (needs a Live restart)
+| File | strings with `\` | strings with `/` |
+|---|---|---|
+| `Factory Packs/Beat Tools/Ableton Folder Info/Metadata.cfg` | 1207 | 0 |
+| `Live 12 Core Library/Ableton Folder Info/Metadata.cfg` | 0 | 8400 |
+
+Live resolves what a pack folder contains from that map. On Linux a key with a
+backslash never matches the path being asked for, so nothing is listed below the
+first level (keys without a separator, i.e. the pack's top-level folder names,
+still match, which is exactly the observed behaviour). It also explains why the
+pack paths are never passed to `getdents64`.
+
+### Fix, measured
+
+Replacing `5C 00` with `2F 00` in that file (UTF-16LE backslash to slash) makes
+Live index the pack normally. Rows per pack place, before and after
+(`select p.name, count(f.file_id) from places p left join files f on
+f.place_id = p.file_id`):
+
+| Pack | before | after |
+|---|---|---|
+| Bomblastic | 4 | **901** |
+| Beat Tools | 9 | **631** |
+| Drum Essentials | 5 | **388** |
+| Breakbeats by KutMasta Kurt | 5 | **276** |
+| Microtuner | 3 | **42** |
+| Generators by Iftah | 3 | **21** |
+| Core Library | 8295 | 8295 (untouched) |
+
+The whole index went from 9596 to 11827 files, and `Beat Tools/Drums` now has
+its 30+ `.adg` kits as rows, which is what the browser lists.
+
+Shipped in the repo: `tools/fix-pack-paths.py` (idempotent, `--dry-run`) and an
+`install.sh` step that runs it over the portable `live-home` packs and
+`~/Music/Ableton/Factory Packs`. A pack installed later by Live needs the script
+run again; a shim hook on `open()` of `Metadata.cfg` would cover that too.
+
+## Superseded: static probe notes
+
+REA with the Ghidra provider is verified working on this machine (JDK 25 pinned
+by `~/.local/bin/rea-mcp`; `open_binary` returned the `Ableton Index` ELF). The
+static route is no longer needed for this bug.
+
+## Older probe (needs a Live restart)
 
 Strace the indexer during a real startup scan, which is the only place a full
 scan happens:
