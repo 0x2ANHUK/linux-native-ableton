@@ -923,7 +923,8 @@ fi
 # Live writes itself, use '/'. Live looks a folder's contents up in that map, so
 # on Linux a backslashed key never matches: a pack lists its first-level folders
 # and nothing below them. tools/fix-pack-paths.py rewrites only those UTF-16
-# separators and is idempotent.
+# separators and is idempotent. The shim does the same at every start (shim/packmeta.cpp),
+# so this step only matters when that is off or the shim is not loaded.
 step "Fixing the paths inside pack browser metadata"
 PACK_ROOTS=()
 [ -d "$PREFIX/live-home/Music/Ableton/Factory Packs" ] && PACK_ROOTS+=("$PREFIX/live-home/Music/Ableton/Factory Packs")

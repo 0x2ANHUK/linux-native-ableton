@@ -153,6 +153,21 @@ Shipped in the repo: `tools/fix-pack-paths.py` (idempotent, `--dry-run`) and an
 `~/Music/Ableton/Factory Packs`. A pack installed later by Live needs the script
 run again; a shim hook on `open()` of `Metadata.cfg` would cover that too.
 
+## Now automatic: the shim fixes it at start-up
+
+`shim/packmeta.cpp` does the same rewrite for every pack under
+`$HOME/Music/Ableton/Factory Packs` once at start-up, before Live starts
+`Ableton Index` (`MENUFIX_PACK_META=0` turns it off). A pack Live installs itself is
+therefore fixed on the next start, without running a script.
+
+Verified on the installed Live 12.4.7: 4019 separators were injected back into
+`Beat Tools/Ableton Folder Info/Metadata.cfg`, one start logged
+`packmeta: ...: 4019 separators` and `rewrote the metadata of 1 pack(s)`, the
+pack stayed indexed, and the next start wrote nothing (idempotent).
+
+The `install.sh` step with `tools/fix-pack-paths.py` stays: it covers an install
+whose shim is disabled, and it can fix a folder by hand.
+
 ## Superseded: static probe notes
 
 REA with the Ghidra provider is verified working on this machine (JDK 25 pinned
