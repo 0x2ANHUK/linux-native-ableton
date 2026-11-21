@@ -41,7 +41,7 @@ Commits: `04291ea` (LIVE_WHEEL_TRACE), `055a533` (the value controls), `a55dc93`
 | Body | `docs/pr/max-editing.md` |
 
 `b35bb0f` `MAX_EDIT.md` · `a76c71c` the four editor fixes, the launch path and the wiring ·
-`20ff2fd` the rebuilt binaries.
+`20ff2fd` the rebuilt binaries · `a1e7ff3` the README line.
 
 ## 4. State and handoff — this branch
 
@@ -54,6 +54,14 @@ mergeable.
 `feat/max-edit` (worktree `~/dev/linux-native-ableton-maxedit`) has wheel + packs + Edit in Max
 in one tree, built as one shim. That is what is installed on this machine; it is **not** for
 submission.
+
+## Overlap between the two prepared PRs
+
+`install.sh`, `README.md`, `shim/build.sh` and `shim/libmenufix.so` are touched by both.
+Whoever lands first wins the merge; rebase the other branch, run `./shim/build.sh`, and
+force-push that branch with `--force-with-lease`. The binary has to differ between the
+branches (`libmenufix.so` holds the feature), so a merge conflict in it is expected, not a
+mistake.
 
 ## Commands
 
