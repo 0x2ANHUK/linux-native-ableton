@@ -73,6 +73,7 @@ void installDragCursor();
 void installSleepInhibit();
 void installPointerWarp();
 void installScaleFollow();
+void installWheelTrace(); // wheeltrace.cpp
 
 namespace {
 
@@ -249,5 +250,6 @@ static void installMenuCloser()
     installSleepInhibit();
     installPointerWarp();
     installScaleFollow();
+    installWheelTrace();
 }
 Q_COREAPP_STARTUP_FUNCTION(installMenuCloser)
