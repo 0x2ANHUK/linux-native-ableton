@@ -74,6 +74,7 @@ void installSleepInhibit();
 void installPointerWarp();
 void installScaleFollow();
 void installWheelTrace(); // wheeltrace.cpp
+void fixPackMetaPaths(); // packmeta.cpp
 void installWheelValues(); // wheelvalues.cpp
 
 namespace {
@@ -253,5 +254,6 @@ static void installMenuCloser()
     installScaleFollow();
     installWheelTrace();
     installWheelValues();
+    fixPackMetaPaths();
 }
 Q_COREAPP_STARTUP_FUNCTION(installMenuCloser)

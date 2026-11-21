@@ -39,13 +39,16 @@ This project is not affiliated with or endorsed by Ableton. Licensing is not tou
 **Push, Max for Live, themes**
 - Push 2 and Push 3 run through the Push 3 companion program, as on a standalone Push 3. The installer offers a udev rule for USB access. Not tested here (no Push hardware).
 - Max for Live device interfaces are hidden in Clip view and over a collapsed detail area, and placed and scaled correctly at desktop scales other than 100 %. `LIVE_MAX_VIEWS=0` turns this off.
-- Edit in Max on a Max for Live device showed "serious program error" and closed Live. It now shows a note instead. `LIVE_MAX_EDIT=0` turns this off. `LIVE_MAX_EDIT=1` opens the device in Live's bundled Linux Max editor, where it can be edited and saved (experimental, tested with a MIDI effect, see `MAX_EDIT.md`).
+- Edit in Max on a Max for Live device showed "serious program error" and closed Live. It now opens the device in Live's bundled Linux Max editor (`Resources/Max/Max`), where it can be edited and saved, and Live takes the saved device back. `LIVE_MAX_EDIT=0` leaves a note instead and starts nothing. Verified with a MIDI effect; audio and instrument devices and devices from packs are untested, see `MAX_EDIT.md`.
 - Your own themes: put `.ask` files into `~/.local/share/Ableton/Themes/Live 12/` (Live 11: `Themes/Live 11/`) and restart Live.
 
 **Scroll wheel and touchpad**
 - The mouse wheel and touchpad scroll now change the value under the pointer: knobs, sliders, number boxes, the mixer's track volume, pan and sends, device parameters, rack macros and the dials, sliders and number boxes of Max for Live devices. Live 12.4.7's Linux build only scrolled lists. Undo, automation and modulation work as for a mouse drag.
 - Hold Ctrl or Shift for fine steps. `LIVE_WHEEL_VALUES=0` turns this off. Not on Live 11.
 - `LIVE_WHEEL_TRACE=1` with `MENUFIX_DEBUG=<file>` logs how scroll events reach Live, for bug reports.
+
+**Factory packs**
+- Pack contents show in the browser. A pack's `Ableton Folder Info/Metadata.cfg` stores its folders and files with Windows separators, which this Live build never matches, so every pack folder past the first level was empty. The shim rewrites those separators at start-up (`shim/packmeta.cpp`), so a pack Live installs itself is fixed on the next start. `MENUFIX_PACK_META=0` turns this off; `tools/fix-pack-paths.py` does the same for one folder by hand.
 
 **Fixes**
 - Instruments, Audio Effects, MIDI Effects, Modulators and Max for Live were empty in the browser with the default install folder (Live skips paths with a hidden folder such as `.local`).

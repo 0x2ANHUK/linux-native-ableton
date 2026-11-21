@@ -1,6 +1,6 @@
 # Editing Max for Live devices on native Linux Live 12.4.7
 
-Status: with `LIVE_MAX_EDIT=1`, Edit in Max opens the device in Live's bundled Linux Max editor. Editing and saving work, and Live picks up the saved device (verified 2026-11-21, see "Working" below). Without it, the crash is fixed and a note is shown. Evidence comes first; each line is marked **verified** (read in the shipped binaries or logs) or **inferred**.
+Status: Edit in Max opens the device in Live's bundled Linux Max editor (on by default since the shim default changed; `LIVE_MAX_EDIT=0` leaves the note instead). Editing and saving work, and Live picks up the saved device (verified 2026-11-21, see "Working" below). Without it, the crash is fixed and a note is shown. Evidence comes first; each line is marked **verified** (read in the shipped binaries or logs) or **inferred**.
 
 ## Root cause (verified, static analysis + Live's log)
 
