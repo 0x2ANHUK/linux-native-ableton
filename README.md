@@ -39,6 +39,7 @@ This project is not affiliated with or endorsed by Ableton. Licensing is not tou
 **Push, Max for Live, themes**
 - Push 2 and Push 3 run through the Push 3 companion program, as on a standalone Push 3. The installer offers a udev rule for USB access. Not tested here (no Push hardware).
 - Max for Live device interfaces are hidden in Clip view and over a collapsed detail area, and placed and scaled correctly at desktop scales other than 100 %. `LIVE_MAX_VIEWS=0` turns this off.
+- Edit in Max on a Max for Live device showed "serious program error" and closed Live. It now shows a note instead. `LIVE_MAX_EDIT=0` turns this off. `LIVE_MAX_EDIT=1` tries Live's bundled Linux Max editor (experimental, see `MAX_EDIT.md`).
 - Your own themes: put `.ask` files into `~/.local/share/Ableton/Themes/Live 12/` (Live 11: `Themes/Live 11/`) and restart Live.
 
 **Scroll wheel and touchpad**

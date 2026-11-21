@@ -64,6 +64,7 @@
 
 void menufixTrace(const char *fmt, int a = 0, int b = 0, int c = 0);
 bool maxWheelInstall(); // maxwheel.cpp
+void maxEditInstall(); // maxedit.cpp
 void *hookFunction(uintptr_t fn, const unsigned char *prologue, size_t len, void *replacement); // hook.cpp
 
 namespace {
@@ -177,6 +178,7 @@ void pass(void *registry, void *view, void *region)
         return; // no Max device has been placed yet
     if (liveBuild() == LiveBuild::Live12_4_7)
         maxWheelInstall(); // wheel over dials and sliders (the Max runtime is loaded by now)
+    maxEditInstall(); // the Max runtime is loaded by now
     const double now = currentRatio();
     const bool changed = passRatio != 0 && now != passRatio;
     passRatio = now;

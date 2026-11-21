@@ -1,0 +1,6 @@
+#!/bin/sh
+# Live's Linux Max editor with libmaxstatfix.so preloaded (see maxstatfix.c). With
+# LIVE_MAX_EDIT=1, shim/maxedit.cpp makes Max for Live launch this instead of the editor
+# itself and puts the editor's path (Resources/Max/Max) in LIVE_MAX_EDITOR.
+[ -x "$LIVE_MAX_EDITOR" ] || exit 1
+LD_PRELOAD="$(dirname "$(readlink -f "$0")")/libmaxstatfix.so${LD_PRELOAD:+:$LD_PRELOAD}" exec "$LIVE_MAX_EDITOR" "$@"
