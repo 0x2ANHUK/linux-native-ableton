@@ -28,6 +28,18 @@ Run-time result of the first version (no path check): Live no longer aborted (lo
 
 `Resources/Max/Max --mfl` was started alone, with a scratch HOME, DISPLAY=:1, no Live running and a 25 s timeout. It loaded every extension, built its database, ran `interface_init` and `maxwindow_mayshow`, and started Node for Max/RNBO. It did not crash and showed no authorisation prompt in Max.log (only `authwindow_initclass`). The only complaints were missing fonts (Lato, Arial). Nothing of the user's install was written: all files went to the scratch HOME, which is deleted. Not tested: starting it from Live, the IPC handshake, editing and saving, and authorisation in that mode.
 
+### Launched from Live (2026-11-21, verified)
+
+With `LIVE_MAX_EDIT=1`, right-click on a Max MIDI Effect, then Edit in Max:
+
+- `shim/max-editor` started `Resources/Max/Max --mfl`. Live did not crash and there was no stray copy of Live.
+- The editor opened its Max Console window and created its MIDI ports, and Live picked them up.
+- Without `libmaxstatfix.so`, the first database update never ends. With it, the update took about 2.5 min on the install's resources (09:36:05 to 09:38:29). Each file is slow because Max stats every parent folder of it.
+- The device patcher never opens, and Live stays at "Starting Max Editor...". The editor's main thread services Live's IPC about four times a second. Each request is `object_new_typed(nobox, liveowner)`, read with gdb at Max+0x6e7ec8, and it fails. On failure Max logs "loading audio lib!", instantiates `cycle~` to load MSP, and then fails again.
+- `liveowner` is named in MaxAudioAPI.so, libMaxPlugLib.so and libpatcher.so. The editor maps MaxAudioAPI.so but never opens libMaxPlugLib.so, libMaxForLive.so or libpatcher.so (strace of every open). MSP itself reports "MSP/ad: no ad folder" and "ad_portaudio: No such object": the Linux runtime ships no `ad` driver folder.
+- Next lead: find which library registers the `liveowner` class and what it needs. Either load that library into the editor, or supply the missing `ad` folder so MSP finishes initialising. Not tried yet.
+- Also seen, probably harmless: `maxxslt` wants libxml2.so.2 (the host has only .so.16), and a sqlite "unable to open database file" error on start.
+
 ## Options
 
 | Option | What works / blockers | Licence impact | Effort, risk | Verdict |
@@ -41,5 +53,5 @@ Run-time result of the first version (no path check): Live no longer aborted (lo
 ## Not verified
 
 - Run time: which of path or exec fails (needs Live's stderr). Whether `Resources/Max/Max --mfl` starts on Linux at all. How it authorises.
-- That the shim fix behaves at run time: built without warnings, not run in Live.
+- Editing, saving and reloading a device from the Linux editor: blocked at `liveowner`, see above.
 - Option (a) behaviour of Max 9 under wine on this machine. Since this study a peer agent has copied a Windows Max runtime (Max.exe) into `~/.wine-ableton-beta/drive_c/ProgramData/Ableton/Live 12 Beta/Resources/`, without the user's licence or settings and without Live. Starting it under wine and authorising it are not tested.
