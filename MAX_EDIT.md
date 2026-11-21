@@ -1,6 +1,6 @@
 # Editing Max for Live devices on native Linux Live 12.4.7
 
-Status: with `LIVE_MAX_EDIT=1`, Edit in Max opens the device in Live's bundled Linux Max editor. Editing and saving work, and Live picks up the saved device (verified 2026-11-21, see "Working" below). Without it, the crash is fixed and a note is shown. Evidence comes first; each line is marked **verified** (read in the shipped binaries or logs) or **inferred**.
+Status: Edit in Max opens the device in Live's bundled Linux Max editor, on by default (`LIVE_MAX_EDIT=0` leaves the note instead). Editing and saving work and Live takes the saved device back, verified from Live on 2026-11-21 (see "Working" below). Evidence comes first; each line is marked **verified** (read in the shipped binaries or logs) or **inferred**.
 
 ## Root cause (verified, static analysis + Live's log)
 
@@ -72,7 +72,7 @@ aborting thread is caught with its own symbols instead of a stripped frame in a 
 paths relative to Live's working directory, which do not resolve in the editor and only
 produced `ld.so` warnings in Max's output.
 
-### The editor opens, then asks for an Ableton account (2026-11-21, verified)
+### The editor opens, asks for an Ableton account once, then edits and saves (2026-11-21, verified)
 
 A third run did start: `Resources/Max/Max --mfl` (pid 23440) through the normal
 `shim/max-editor`, and a window "Max Audio Effect (unlocked)" holding the device's
@@ -84,9 +84,11 @@ Live on the same machine is licensed: `Licensing: Installed variant: Suite`,
 `BaseProduct=02, IsUnlocked?=true`. The editor either does not ask Live for that state here
 or Live's answer does not arrive, so Max falls back to asking the person.
 
-That makes authorisation the remaining blocker, not the launch. Logging in with the owner's
-own Ableton account in that window is the supported path and has not been tried yet; feeding
-the editor a token from outside is not (licensing is out of scope for this project).
+Authorisation, not the launch, was the remaining blocker. Logging in with the owner's own
+Ableton account in that window is the supported path and it was taken: editing and saving a
+device from Live then worked and Live loaded the saved device. Nothing outside Max is fed a
+token; licensing stays out of scope for this project. `LIVE_MAX_EDIT` is therefore on by
+default again, with `LIVE_MAX_EDIT=0` for the note.
 
 The abort is intermittent: two Live-started runs aborted in Max's start-up (above), the
 third did not, and a gdb-attached run did not abort either, so it is a race in Max's own

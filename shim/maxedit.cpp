@@ -1,7 +1,8 @@
-// "Edit" on a Max for Live device (Live 12.4.7, Max 9.1.5). LIVE_MAX_EDIT=0 turns this off;
-// LIVE_MAX_EDIT=1 opens the device in the bundled Linux Max editor (Resources/Max/Max) through
-// shim/max-editor. Off by default: when Live starts that editor it aborts during Max's own
-// start-up (see MAX_EDIT.md), while the same editor started by hand does not.
+// "Edit" on a Max for Live device (Live 12.4.7, Max 9.1.5). LIVE_MAX_EDIT=0 leaves the note
+// instead; otherwise the device opens in the bundled Linux Max editor (Resources/Max/Max)
+// through shim/max-editor. On by default: verified by editing and saving a device from Live.
+// The editor asks for an Ableton account the first time (see MAX_EDIT.md), and Max's own
+// start-up aborts now and then, so the first attempt can fail and a second one works.
 //
 // Live calls Wires::EditWithPreview in the Max runtime's libpatcher.so. With no Max editor
 // process running it calls WiresPrivate::mfl_device_edit, which launches
@@ -134,7 +135,7 @@ void maxEditInstall()
         cachedEditorPath = static_cast<char **>(dlsym(lib, "s_editor_path"));
         const char *on = getenv("LIVE_MAX_EDIT");
         Dl_info self;
-        if (on && *on == '1' && dladdr(reinterpret_cast<void *>(&maxEditInstall), &self) && self.dli_fname) {
+        if ((!on || *on != '0') && dladdr(reinterpret_cast<void *>(&maxEditInstall), &self) && self.dli_fname) {
             const std::string shim(self.dli_fname);
             const std::string script = shim.substr(0, shim.rfind('/') + 1) + "max-editor";
             const std::string editor = path.substr(0, path.rfind("/resources/support/")) + "/Max";
