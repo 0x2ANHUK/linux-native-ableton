@@ -1,6 +1,6 @@
 # Editing Max for Live devices on native Linux Live 12.4.7
 
-Status: Edit in Max opens the device in Live's bundled Linux Max editor (on by default since the shim default changed; `LIVE_MAX_EDIT=0` leaves the note instead). Editing and saving work, and Live picks up the saved device (verified 2026-11-21, see "Working" below). Without it, the crash is fixed and a note is shown. Evidence comes first; each line is marked **verified** (read in the shipped binaries or logs) or **inferred**.
+Status: with `LIVE_MAX_EDIT=1`, Edit in Max opens the device in Live's bundled Linux Max editor. Editing and saving work, and Live picks up the saved device (verified 2026-11-21, see "Working" below). Without it, the crash is fixed and a note is shown. Evidence comes first; each line is marked **verified** (read in the shipped binaries or logs) or **inferred**.
 
 ## Root cause (verified, static analysis + Live's log)
 
@@ -38,6 +38,39 @@ With `LIVE_MAX_EDIT=1`: right-click a Max for Live device, then Edit in Max. The
 4. **zenity file dialog** (`maxstatfix.c`, editor). Max's Save runs `zenity --file-filter= *.amxd`. zenity 4 never shows a window for a filter with an empty name, so Save hung, and so did Live with it. The blanks are dropped in `execvp` (`--file-filter=*.amxd`).
 
 Seen but harmless: `maxxslt` wants libxml2.so.2 (the host has only .so.16). sqlite prints "unable to open database file" on start. Missing fonts (Lato, Arial, Ableton Sans). "MSP/ad: no ad folder": the editor's audio driver is "Live from adplugrunner", added once the link is up.
+
+### Live-launched editor aborts during Max's start-up (2026-11-21, verified)
+
+With `LIVE_MAX_EDIT=1`, right-click > Edit in Max on a Max Audio Effect starts
+`Resources/Max/Max --mfl` through `shim/max-editor`, Live stays at "starting Max editor...",
+and the editor dies about 13 s later with SIGABRT. Two runs, two cores
+(`/tmp/core.Max.12037`, `/tmp/core.Max.17904`), same signature:
+
+```
+#6  l_alloc (ptr=0x45f0, nsize=139629179890507) at lua/src/lauxlib.c:631
+#13 luaopen_gen2_GenExpr_Language (L=...) at extensions/genpatcher/gen.lua.c:3394
+#24 luaopen_gen2_GenExpr_constantexpr at extensions/genpatcher/gen.lua.c:2424
+```
+
+`abort()` out of Lua's allocator with a pointer that is not a heap address and a
+nonsense size: the Lua heap was already corrupted, this is not a Lua-level error.
+Max's own log stops at the same line in both runs — `ERROR: typeface name Ableton Sans
+Medium ... not found` right after `startup_load(max-startup)`.
+
+The same editor binary started by hand does **not** abort: 40-60 s each, with `HOME=live-home`,
+the same `DISPLAY`, `LIBRARY_PATH`, `LD_PRELOAD=libmaxstatfix.so` (and again with
+`libpathfix.so` added), and with Live running. So the trigger is in how Live starts it —
+the handshake, or what Live has already patched in its own process before the fork — not in
+the editor alone.
+
+Because a hang at "starting Max editor..." is worse than the note, Edit in Max is **off by
+default again** (`LIVE_MAX_EDIT=1` starts the editor, `LIVE_MAX_EDIT=0` or unset shows the
+note). Next probe: put gdb in `shim/max-editor` and let Live start the editor again, so the
+aborting thread is caught with its own symbols instead of a stripped frame in a core.
+
+`shim/max-editor` also passes only absolute `LD_PRELOAD` entries on now: the launcher uses
+paths relative to Live's working directory, which do not resolve in the editor and only
+produced `ld.so` warnings in Max's output.
 
 ## Options
 
