@@ -9,7 +9,7 @@ updated without rewriting it: `docs/pr/scroll-wheel.md`, `docs/pr/packs-and-m4l.
 | | |
 |---|---|
 | Branch | `pr/scroll-wheel` at `a55dc93` (= the wheel worktree's `feat/wheel-scroll-values`) |
-| Fork branch | `fork/wheel-scroll-values` |
+| Fork branch | `fork/wheel-scroll-values`, and `fork/pr/scroll-wheel` (same commit) |
 | PR | **#8**, open, base `main` — https://github.com/velkajelka/linux-native-ableton/pull/8 |
 | Body | `docs/pr/scroll-wheel.md` |
 | State | The maintainer (or the owner) took it out of draft; no review comments yet |
@@ -20,8 +20,8 @@ Commits: `04291ea` (LIVE_WHEEL_TRACE), `055a533` (the value controls), `a55dc93`
 
 | | |
 |---|---|
-| Branch | `pr/packs-and-m4l` at `39bff78` (= the maxedit worktree's `feat/max-edit`) |
-| Fork branch | `fork/feat/max-edit` (same commit) |
+| Branch | `pr/packs-and-m4l` at `e855f84` (= the maxedit worktree's `feat/max-edit`) — pushed to the fork |
+| Fork branch | `fork/pr/packs-and-m4l` (same commit); `fork/feat/max-edit` is the same tree |
 | PR | none yet |
 | Body | `docs/pr/packs-and-m4l.md` |
 
