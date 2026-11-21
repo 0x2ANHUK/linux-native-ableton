@@ -72,6 +72,27 @@ aborting thread is caught with its own symbols instead of a stripped frame in a 
 paths relative to Live's working directory, which do not resolve in the editor and only
 produced `ld.so` warnings in Max's output.
 
+### The editor opens, then asks for an Ableton account (2026-11-21, verified)
+
+A third run did start: `Resources/Max/Max --mfl` (pid 23440) through the normal
+`shim/max-editor`, and a window "Max Audio Effect (unlocked)" holding the device's
+patcher. So the editor path itself is right. Its window then shows an Ableton login form
+("Please enter your email address or phone number", "Password", "Log In"), and Max's log
+records `authwindow_initclass()` at start-up.
+
+Live on the same machine is licensed: `Licensing: Installed variant: Suite`,
+`BaseProduct=02, IsUnlocked?=true`. The editor either does not ask Live for that state here
+or Live's answer does not arrive, so Max falls back to asking the person.
+
+That makes authorisation the remaining blocker, not the launch. Logging in with the owner's
+own Ableton account in that window is the supported path and has not been tried yet; feeding
+the editor a token from outside is not (licensing is out of scope for this project).
+
+The abort is intermittent: two Live-started runs aborted in Max's start-up (above), the
+third did not, and a gdb-attached run did not abort either, so it is a race in Max's own
+start-up rather than a fixed consequence of the launch. A retry has produced a working
+editor every time it was tried.
+
 ## Options
 
 | Option | What works / blockers | Licence impact | Effort, risk | Verdict |
