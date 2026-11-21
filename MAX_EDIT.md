@@ -1,6 +1,6 @@
 # Editing Max for Live devices on native Linux Live 12.4.7
 
-Status: the crash is fixed by `shim/maxedit.cpp`. Editing itself does not work yet. Evidence comes first; each line is marked **verified** (read in the shipped binaries or logs) or **inferred**.
+Status: with `LIVE_MAX_EDIT=1`, Edit in Max opens the device in Live's bundled Linux Max editor. Editing and saving work, and Live picks up the saved device (verified 2026-11-21, see "Working" below). Without it, the crash is fixed and a note is shown. Evidence comes first; each line is marked **verified** (read in the shipped binaries or logs) or **inferred**.
 
 ## Root cause (verified, static analysis + Live's log)
 
@@ -28,23 +28,22 @@ Run-time result of the first version (no path check): Live no longer aborted (lo
 
 `Resources/Max/Max --mfl` was started alone, with a scratch HOME, DISPLAY=:1, no Live running and a 25 s timeout. It loaded every extension, built its database, ran `interface_init` and `maxwindow_mayshow`, and started Node for Max/RNBO. It did not crash and showed no authorisation prompt in Max.log (only `authwindow_initclass`). The only complaints were missing fonts (Lato, Arial). Nothing of the user's install was written: all files went to the scratch HOME, which is deleted. Not tested: starting it from Live, the IPC handshake, editing and saving, and authorisation in that mode.
 
-### Launched from Live (2026-11-21, verified)
+### Working: four fixes on top of the path (2026-11-21, verified)
 
-With `LIVE_MAX_EDIT=1`, right-click on a Max MIDI Effect, then Edit in Max:
+With `LIVE_MAX_EDIT=1`: right-click a Max for Live device, then Edit in Max. The editor opens the device's patcher. Live greys the device out while the editor has it. Edits and File > Save work. Live then loads the saved device: the test device was renamed to the file name and kept the new object. Closing the patcher gives the device back to Live. Quitting Live afterwards is clean. Test: a Max MIDI Effect, an added `print hello` object, saved to a scratch `.amxd`, and the file checked. Each fix below was found at run time, in this order:
 
-- `shim/max-editor` started `Resources/Max/Max --mfl`. Live did not crash and there was no stray copy of Live.
-- The editor opened its Max Console window and created its MIDI ports, and Live picked them up.
-- Without `libmaxstatfix.so`, the first database update never ends. With it, the update took about 2.5 min on the install's resources (09:36:05 to 09:38:29). Each file is slow because Max stats every parent folder of it.
-- The device patcher never opens, and Live stays at "Starting Max Editor...". The editor's main thread services Live's IPC about four times a second. Each request is `object_new_typed(nobox, liveowner)`, read with gdb at Max+0x6e7ec8, and it fails. On failure Max logs "loading audio lib!", instantiates `cycle~` to load MSP, and then fails again.
-- `liveowner` is named in MaxAudioAPI.so, libMaxPlugLib.so and libpatcher.so. The editor maps MaxAudioAPI.so but never opens libMaxPlugLib.so, libMaxForLive.so or libpatcher.so (strace of every open). MSP itself reports "MSP/ad: no ad folder" and "ad_portaudio: No such object": the Linux runtime ships no `ad` driver folder.
-- Next lead: find which library registers the `liveowner` class and what it needs. Either load that library into the editor, or supply the missing `ad` folder so MSP finishes initialising. Not tried yet.
-- Also seen, probably harmless: `maxxslt` wants libxml2.so.2 (the host has only .so.16), and a sqlite "unable to open database file" error on start.
+1. **btrfs inodes** (`maxstatfix.c`, editor). Max identifies folders by `st_ino` alone. btrfs subvolume roots all have inode 256, so the first database update never ends. Directories with inode 256 get the device number mixed in. The first update then takes about 2.5 min on the install's resources; Max stats every parent folder of each file.
+2. **`liveowner` class** (`maxstatfix.c`, editor). Before it shows a patcher, Live asks the editor for `object_new_typed(nobox, liveowner)` about four times a second (gdb at Max+0x6e7ec8). The class is registered by MaxAudioAPI+0x57bd0, which nothing calls in this Linux build: not the editor, and not Live (a breakpoint there never hit during Edit). On failure Max logs "loading audio lib!". The fix calls that function once MaxAudioAPI.so is loaded, after its 16 bytes are checked. Calling it by hand in a running editor opened the patcher at once.
+3. **Shared memory** (`maxshmem.c`, Live and editor). Once the editor has the device, Live's audio thread crashed (SEGV in `audiobuffer_client_setschedtime` from `Wires::Process`, a null buffer). `sysshmem_alloc` and `sysshmem_open` are stubs that fail, both in libMaxPlugLib.so (Live) and in the editor binary. They, and `sysshmem_close`, are replaced with POSIX `shm_open`/`mmap` versions when their bytes are the known stub. The buffers are the `/dev/shm/PI1*` segments; their creator unlinks them on close and at exit. Max's own semaphores (`sem.PI1S1<pid>`, 32 bytes) were already working.
+4. **zenity file dialog** (`maxstatfix.c`, editor). Max's Save runs `zenity --file-filter= *.amxd`. zenity 4 never shows a window for a filter with an empty name, so Save hung, and so did Live with it. The blanks are dropped in `execvp` (`--file-filter=*.amxd`).
+
+Seen but harmless: `maxxslt` wants libxml2.so.2 (the host has only .so.16). sqlite prints "unable to open database file" on start. Missing fonts (Lato, Arial, Ableton Sans). "MSP/ad: no ad folder": the editor's audio driver is "Live from adplugrunner", added once the link is up.
 
 ## Options
 
 | Option | What works / blockers | Licence impact | Effort, risk | Verdict |
 |---|---|---|---|---|
-| (e) Bundled native `Max --mfl` | The editor binary exists and starts on Linux (verified, test above), and Live, libpatcher and Max all have the IPC path. Blocker: the editor path is a folder; `LIVE_MAX_EDIT=1` points it at the binary. Next step is to make `path_mfl_getapppath` resolve to `Resources/Max/Max` (set Live's Max application path, or the two globals) and then watch the launch. Unknown: whether the Linux editor starts, finds its resources and authorises. It shows an authorisation window, so it may need the Ableton account like Max on other systems. | Inferred: Max for Live in Suite is authorised by Live and the editor asks Live. Not verified. Do not try it with the user's set or licence before a test with a scratch HOME is agreed. | Small to medium, low risk once tested in a sandbox | **Recommended next experiment** |
+| (e) Bundled native `Max --mfl` | The editor binary exists and starts on Linux (verified, test above), and Live, libpatcher and Max all have the IPC path. Blocker: the editor path is a folder; `LIVE_MAX_EDIT=1` points it at the binary. Next step is to make `path_mfl_getapppath` resolve to `Resources/Max/Max` (set Live's Max application path, or the two globals) and then watch the launch. Unknown: whether the Linux editor starts, finds its resources and authorises. It shows an authorisation window, so it may need the Ableton account like Max on other systems. | Inferred: Max for Live in Suite is authorised by Live and the editor asks Live. Not verified. Do not try it with the user's set or licence before a test with a scratch HOME is agreed. | Small to medium, low risk once tested in a sandbox | **Done**: works with `LIVE_MAX_EDIT=1`, see above |
 | (a) Windows Max 9 under wine | Max 9 runs under wine as community reports say, with known trouble in the CEF/Chromium browser and docs views, D2D/GPU drawing and ASIO. shibco/ableton-linux installs Windows Live with Max 8/9 under wine. That Max edits devices inside the *wine* Live, not this native Live. | Separate Max licence or the Ableton-account check inside wine. It does not touch native Live's Unlock. | Medium, medium risk | Usable only as an offline editor |
 | (b) Bridge: launcher, then wine Max, then reload | Live never asks for an external app here: the edit request ends in the in-process runtime, which wants a `Max --mfl` that speaks Max's `remote_object` IPC. A wine Max does not speak that protocol to a Linux process (inferred). What remains is copy-out editing: open the device's `.amxd` in wine Max, save it, and Live reloads the device (hot-swap or re-drop). | As (a) | Medium. The reload is manual unless a Remote Script does it | Workable fallback, not "Edit in Max" |
 | (c) In-process editor in Live | libMaxPlugLib.so contains `PatcherComponent`, `PatcherToolbarComponent`, `InspectorButtonComponent`, `patcherview_edit`, `patcherview_vis` and `jpatcher_get_firstview` (verified). But `mfl_device_edit` on the local path only sends `disableui` to the device view and sets up the remote owner. The editor is always the other process (verified from the code path). Opening a patcher window in Live's process would mean driving Max internals (`patcherview_vis` plus edit mode) that Live does not expect: undo, saving and device reload all run through the editor process's IPC. | None expected | High, high risk (state in Live's Max runtime) | **Not viable**, no prototype made |
@@ -52,6 +51,9 @@ With `LIVE_MAX_EDIT=1`, right-click on a Max MIDI Effect, then Edit in Max:
 
 ## Not verified
 
-- Run time: which of path or exec fails (needs Live's stderr). Whether `Resources/Max/Max --mfl` starts on Linux at all. How it authorises.
-- Editing, saving and reloading a device from the Linux editor: blocked at `liveowner`, see above.
+- Audio and instrument devices (only a MIDI effect was edited), audio passing through a device while it is in the editor, and devices that use Node for Max or JavaScript.
+- Editing a device that came from a pack or the Core Library (only a new device, saved as a new file).
+- Running several editors or devices at once. Recovery after the editor crashes; killing the editor while Live runs crashed Live earlier.
+- Authorisation: no prompt appeared with this Suite install. Not tested without a Suite licence.
+- Other filesystems than btrfs, and other zenity versions.
 - Option (a) behaviour of Max 9 under wine on this machine. Since this study a peer agent has copied a Windows Max runtime (Max.exe) into `~/.wine-ableton-beta/drive_c/ProgramData/Ableton/Live 12 Beta/Resources/`, without the user's licence or settings and without Live. Starting it under wine and authorising it are not tested.

@@ -10,7 +10,8 @@
 // device; its prologue is checked, so another Max build is left alone): an error becomes
 // a note and "no error", and the editor is only launched when its path is a program (see
 // editorLaunchable). With LIVE_MAX_EDIT=1 the editor is Live's own Linux Max (Resources/Max/Max),
-// started through shim/max-editor, which preloads libmaxstatfix.so (btrfs, see maxstatfix.c).
+// started through shim/max-editor, which preloads libmaxstatfix.so (see maxstatfix.c). Both
+// sides get working shared memory for the device's audio (maxshmem.c).
 // See MAX_EDIT.md.
 #include "livebuild.h"
 #include <QMessageBox>
@@ -24,6 +25,7 @@
 
 void menufixTrace(const char *fmt, int a = 0, int b = 0, int c = 0);
 void *hookFunction(uintptr_t fn, const unsigned char *prologue, size_t len, void *replacement); // hook.cpp
+extern "C" int maxShmemInstall(void *(*lookup)(const char *name)); // maxshmem.c
 
 namespace {
 
@@ -137,6 +139,9 @@ void maxEditInstall()
             if (script.size() < 2048 && isExecutableFile(script.c_str()) && isExecutableFile(editor.c_str())) {
                 setenv("LIVE_MAX_EDITOR", editor.c_str(), 1); // read by shim/max-editor
                 launcher = script;
+                // The editor runs the device's audio through shared memory, a stub in this runtime.
+                const int n = maxShmemInstall([](const char *name) { return dlsym(RTLD_DEFAULT, name); });
+                menufixTrace("maxedit: shared memory for the editor: %d of 3 functions\n", n);
             }
         }
         menufixTrace("maxedit: Edit in Max guarded\n");
