@@ -18,7 +18,7 @@ page only tracks state.
   knobs, Audio Effect Rack macros, Max LFO Rate/Depth/Offset.
 - Code: `shim/wheeltrace.cpp`, `shim/wheelvalues.cpp`, `shim/maxwheel.cpp`, `shim/pointerwarp.cpp`.
 - Submit: branch `pr/scroll-wheel` (= commit `a55dc93`), PR #8 open on
-  `velkajelka/linux-native-ableton`.
+  `velkajelka/linux-native-ableton`; branch layout in `PULL-REQUESTS.md`.
 
 ### Pack contents show in the browser — done, fixed at start-up
 
@@ -31,7 +31,7 @@ page only tracks state.
   5 → 276, Microtuner 3 → 42, Generators by Iftah 3 → 21.
 - Shipped three ways: `shim/packmeta.cpp` (automatic, every start, `MENUFIX_PACK_META=0`
   off), `tools/fix-pack-paths.py` (by hand, idempotent, `--dry-run`), and an `install.sh`
-  step. Details and the isolated experiments: `PACK-BUG.md`.
+  step. Details and the isolated experiments: `PACK-BUG.md`. Submit: branch `pr/packs`.
 
 ### Edit in Max edits and saves on Linux — done, on by default
 
@@ -47,7 +47,8 @@ page only tracks state.
 - Max's own start-up aborts now and then (Lua allocator in the gen extension, `PACK-BUG.md`
   has the backtrace); a retry works, and gdb attachment makes it disappear, so it is a race
   in Max, not in the launch.
-- `LIVE_MAX_EDIT=0` restores the old note. Details: `MAX_EDIT.md`.
+- `LIVE_MAX_EDIT=0` restores the old note. Details: `MAX_EDIT.md`. Submit: branch
+  `pr/max-editing`.
 
 ### Tooling that made this possible — repaired
 
