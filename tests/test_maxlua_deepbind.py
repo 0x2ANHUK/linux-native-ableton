@@ -27,8 +27,20 @@ class DeepbindTests(unittest.TestCase):
             "int probe_result(void) { return probe_slot(); }\n"
         )
         cls.build(cls.root / "foreign.c", cls.root / "foreign.so")
-        cls.build(cls.root / "target.c", cls.root / "MaxLua.so")
+        cls.build(cls.root / "target.c", cls.root / "MaxLua.so", "-Wl,-soname,MaxLua.so")
         cls.build(cls.root / "target.c", cls.root / "Other.so")
+        (cls.root / "dependent.c").write_text(
+            "extern int probe_result(void);\n"
+            "int dependent_result(void) { return probe_result(); }\n"
+        )
+        cls.build(
+            cls.root / "dependent.c",
+            cls.root / "JitterAPI.so",
+            f"-L{cls.root}",
+            "-Wl,-rpath,$ORIGIN",
+            "-Wl,--no-as-needed",
+            "-l:MaxLua.so",
+        )
         cls.build(PROBE, cls.root / "deepbind.so", "-ldl")
 
     @classmethod
@@ -85,6 +97,41 @@ class DeepbindTests(unittest.TestCase):
     def test_exact_opt_in_isolates_only_maxlua_basename(self):
         self.assertEqual(self.binding("1"), "1")
         self.assertEqual(self.binding("1", "Other.so"), "2")
+
+    def dependency_binding(self, enabled, preload):
+        script = (
+            "import ctypes,os,sys; "
+            "foreign=ctypes.CDLL(sys.argv[1],mode=os.RTLD_NOW|os.RTLD_GLOBAL); "
+            "early=ctypes.CDLL(sys.argv[2],mode=os.RTLD_LAZY|os.RTLD_LOCAL) "
+            "if sys.argv[4]=='1' else None; "
+            "dependent=ctypes.CDLL(sys.argv[3],mode=os.RTLD_NOW|os.RTLD_LOCAL); "
+            "print(dependent.dependent_result())"
+        )
+        env = dict(os.environ, LD_PRELOAD=str(self.root / "deepbind.so"))
+        env["LIVE_MAXLUA_DEEPBIND"] = enabled
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                script,
+                str(self.root / "foreign.so"),
+                str(self.root / "MaxLua.so"),
+                str(self.root / "JitterAPI.so"),
+                "1" if preload else "0",
+            ],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+
+    def test_internal_dependency_bypasses_dlopen_wrapper(self):
+        self.assertEqual(self.dependency_binding("1", preload=False), "2")
+
+    def test_explicit_early_load_can_protect_a_later_dependency(self):
+        self.assertEqual(self.dependency_binding("0", preload=True), "2")
+        self.assertEqual(self.dependency_binding("1", preload=True), "1")
 
     def test_cannot_rebind_a_module_loaded_before_opt_in(self):
         script = (

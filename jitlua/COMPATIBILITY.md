@@ -60,5 +60,8 @@ MaxLua. No Lua function ran. A separately named, opt-in `dlopen` probe and
 synthetic loader tests are in `jitlua/probe/`; they are not installed in Max.
 This is a plausible interposition mechanism, not proof of the editor crash.
 The probe cannot repair an existing mapping or intercept internal dependency
-loads, and `RTLD_DEEPBIND` changes interposition semantics. Establish the actual
-editor load sequence and review allocator/runtime risks before any deployment.
+loads, and `RTLD_DEEPBIND` changes interposition semantics. `JitterAPI.so` has
+`MaxLua.so` as a `DT_NEEDED` dependency. Synthetic tests confirm that dependency
+loads bypass the wrapper; an explicit earlier protected load preserves local
+bindings in that model. The real editor load order and allocator/runtime risks
+remain unverified; do not deploy the experiment.
