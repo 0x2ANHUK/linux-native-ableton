@@ -40,3 +40,11 @@ repository and serialize compilation with the machine build lock.
 Check with `./scripts/check-lua-opengl.sh` (C++17, Lua 5.1, X11, GL and an accessible
 `DISPLAY`). It serializes builds, runs both tests and removes generated binaries. Agents
 run it as a detached `agent-job`.
+
+## Inspect local Max device resources
+
+`python3 tools/amxd_resources.py /path/to/device.amxd` lists resources in the
+observed `mx@c` container variant with sizes and SHA-256 digests. It is not a
+complete AMXD parser. To extract one exact name, pass `--resource NAME` and
+`--output NEW_FILE`; extraction is mode 0600 and refuses to overwrite a file.
+It does not execute the resource. Keep licensed device content out of this repo.
