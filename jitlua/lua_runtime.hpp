@@ -16,6 +16,7 @@ public:
   Runtime(const Runtime &) = delete;
   Runtime &operator=(const Runtime &) = delete;
   lua_State *state() const noexcept { return state_; }
+  bool registerModule(const char *name, lua_CFunction opener, std::string &error);
   bool load(const char *source, std::size_t size, const char *name, std::string &error);
   bool call(const char *name, const std::vector<Argument> &arguments, std::string &error);
 

@@ -3,9 +3,25 @@
 #include <cassert>
 #include <cstring>
 #include <string>
+static int open_test_module(lua_State *state) {
+  const char *name = lua_tostring(state, 1);
+  if (!name || std::strcmp(name, "jit") != 0)
+    return luaL_error(state, "wrong module name");
+  lua_newtable(state);
+  lua_pushnumber(state, 42);
+  lua_setfield(state, -2, "answer");
+  return 1;
+}
+static int fail_module(lua_State *state) { return luaL_error(state, "module failed"); }
+
 int main() {
   jitlua::Runtime vm;
   std::string error;
+  assert(vm.registerModule("jit", open_test_module, error));
+  assert(!vm.registerModule("broken", fail_module, error));
+  assert(error.find("module failed") != std::string::npos);
+  const char *binding = "assert(jit.answer == 42)";
+  assert(vm.load(binding, std::strlen(binding), "binding", error));
   const char *good = "count=0; function draw() count=count+1 end";
   assert(vm.load(good, std::strlen(good), "good", error));
   assert(vm.call("draw", {}, error));

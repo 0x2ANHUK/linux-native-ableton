@@ -10,6 +10,30 @@ Runtime::Runtime() : state_(luaL_newstate()) {
 }
 Runtime::~Runtime() { lua_close(state_); }
 
+bool Runtime::registerModule(const char *name, lua_CFunction opener, std::string &error) {
+  const int top = lua_gettop(state_);
+  error.clear();
+  if (!name || !*name || !opener) {
+    error = "A module name and opener are required";
+    return false;
+  }
+  lua_pushcfunction(state_, opener);
+  lua_pushstring(state_, name);
+  const int result = lua_pcall(state_, 1, 1, 0);
+  bool ok = result == 0;
+  if (result) {
+    const char *message = lua_tostring(state_, -1);
+    error = message ? message : "Lua module initialization raised a non-string error";
+  } else if (!lua_istable(state_, -1)) {
+    ok = false;
+    error = "Lua module opener did not return a table";
+  } else {
+    lua_setglobal(state_, name);
+  }
+  lua_settop(state_, top);
+  return ok;
+}
+
 bool Runtime::load(const char *source, std::size_t size, const char *name, std::string &error) {
   const int top = lua_gettop(state_);
   error.clear();
