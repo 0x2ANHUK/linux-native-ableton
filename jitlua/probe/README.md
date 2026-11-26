@@ -35,3 +35,20 @@ run scripts. Mock-host testing covers sequencing only; it may crash real Max.
 
 `jit.lualibprobe` next opens Lua's standard libraries and logs before and after;
 it may crash Max and has only been checked against a fake library.
+
+## Experimental loader isolation
+
+`maxlua_deepbind.c` is an **offline-only**, opt-in GNU/Linux loader experiment;
+it is not included in the Live build or enabled in Max. With
+`LIVE_MAXLUA_DEEPBIND=1`, it adds `RTLD_DEEPBIND` only to explicit `dlopen`
+calls for a `MaxLua.so` basename. It cannot affect an already-loaded module or
+an internally loaded dependency. `RTLD_DEEPBIND` can change symbol and allocator
+interposition; do not deploy it in Live or Max without separate review and
+runtime evidence.
+
+`tests/test_maxlua_deepbind.py` builds synthetic libraries and verifies default
+behavior, exact matching, opt-in isolation, and the already-loaded limitation.
+The real `MaxLua.so` was also inspected in a disposable process without calling
+Lua: a previously global stock Lua caused eight `luaopen_*` relocations to point
+outside MaxLua; opt-in isolation kept all 147 observed slots in MaxLua. This
+shows a possible mechanism, **not** the cause of the two editor crashes.

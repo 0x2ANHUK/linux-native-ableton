@@ -50,3 +50,15 @@ REA `ev_4335c1c31e1d038221bd041f9b71d1ec859f30efb3a4664ee97f31d88aea23fc`
 shows Max's `lua_create` initializes Max's Lua class, then opens libraries and
 installs Max's module loader. Use of that lifecycle has not been tested. The
 runtime core therefore borrows an initialized state and never opens libraries.
+
+## Offline loader-isolation experiment
+
+A disposable process loaded stock Lua globally before the installed MaxLua.
+Eight MaxLua `luaopen_*` relocation slots then pointed to stock Lua. Applying
+`RTLD_DEEPBIND` at MaxLua's explicit load kept all 147 observed slots in
+MaxLua. No Lua function ran. A separately named, opt-in `dlopen` probe and
+synthetic loader tests are in `jitlua/probe/`; they are not installed in Max.
+This is a plausible interposition mechanism, not proof of the editor crash.
+The probe cannot repair an existing mapping or intercept internal dependency
+loads, and `RTLD_DEEPBIND` changes interposition semantics. Establish the actual
+editor load sequence and review allocator/runtime risks before any deployment.
