@@ -20,7 +20,8 @@
 # UTF-16LE (5C 00) is replaced, so an already-fixed file is left untouched.
 #
 # Exit status: 0 on success (including nothing to do), 1 on an unreadable file.
-import sys, os
+import os
+import sys
 
 META = os.path.join("Ableton Folder Info", "Metadata.cfg")
 BACKSLASH = b"\x5c\x00"
@@ -46,7 +47,6 @@ def main(argv):
     quiet = "--quiet" in argv
     paths = [a for a in argv if not a.startswith("--")]
     if not paths:
-        print(__doc__.strip().splitlines()[0], file=sys.stderr)
         print("usage: fix-pack-paths.py [--dry-run] [--quiet] DIR...", file=sys.stderr)
         return 2
 
@@ -66,6 +66,7 @@ def main(argv):
                 print(f"{name}: already uses '/'")
             continue
         fixed += 1
+        changed += count
         if dry_run:
             print(f"{name}: would replace {count} separators")
             continue
@@ -75,7 +76,6 @@ def main(argv):
         except OSError as e:
             print(f"{root}: cannot write {meta}: {e}", file=sys.stderr)
             return 1
-        changed += count
         print(f"{name}: replaced {count} separators")
     if not quiet:
         verb = "would fix" if dry_run else "fixed"

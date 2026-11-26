@@ -1,6 +1,6 @@
 # Live packs: browser shows nothing inside a pack folder
 
-Status: root cause **not** fixed. First hard evidence below (2026-11-21,
+Status: root cause verified and fixed (see "Now automatic" below). First hard evidence below (2026-11-21,
 pi session, Live 12.4.7 portable at `~/audio/AbletonLive12-native-portable`,
 index DB `live-home/.local/share/Ableton/Live Database/Live-files-12300.db`).
 
@@ -16,7 +16,7 @@ index DB `live-home/.local/share/Ableton/Live Database/Live-files-12300.db`).
 Read-only queries against `Live-files-12300.db` (`sqlite3 "file:$DB?mode=ro"`):
 
 | Query | Result |
-|---|---|
+| --- | --- |
 | `select count(*) from files` | 9596 |
 | rows under Core Library (`ancestor_id=9`) | **8295** |
 | rows under Factory Packs (`ancestor_id=9528`) | **35** |
@@ -38,7 +38,7 @@ btrfs (`/dev/nvme0n1p2`, `/home`), and `getfattr -d` is empty.
 six with `LibrarySliceInfo`, and the indexer log confirms it was configured
 with them:
 
-```
+```text
 Configure: FactoryPacks: '.../Factory Packs/Beat Tools' [Beat Tools], ... '.../Live 12 Core Library' [Core Library]
 ```
 
@@ -54,7 +54,7 @@ Max btrfs-inode bug (`maxstatfix.c`) is not this.
 Three fixtures, each indexed with one Live restart (scan runs at every start).
 
 | Fixture | Where | Result in the index DB |
-|---|---|---|
+| --- | --- | --- |
 | 5 `.adg` copies of `Beat Tools/Drums`, one nested folder | `User Library/CopyTest/Drums` | **indexed fully**, place 10, files at ids 9742-9747 |
 | same two `.adg` + `Ableton Folder Info` copy | `User Library/CopyInfo/Drums` | **indexed fully**, place 10, `Drums` gets both files (9763, 9764) |
 | same two `.adg`, no `Ableton Folder Info` | `Factory Packs/TestNoInfo/Drums` | **not indexed at all** |
@@ -69,7 +69,7 @@ place is only ever enumerated one level deep.
 The runtime agrees. An `strace -f` of Live's startup (filtered to
 `openat,getdents64,statx,newfstatat`) shows Live stat-ing and opening only:
 
-```
+```text
 .../Factory Packs/Beat Tools                      (41 stat/branch hits)
 .../Factory Packs/Beat Tools/Ableton Folder Info/Properties.cfg  (18)
 ```
@@ -109,7 +109,7 @@ or Live stops at the recovery dialog and never starts the indexer.
 A pack's `Ableton Folder Info/Metadata.cfg` stores its folder and file entries as
 UTF-16 strings with **backslashes**:
 
-```
+```text
 Ableton Folder Info\Previews\Drums
 Ableton Folder Info\Previews\MIDI Clips\110 - 124 bpm
 ```
@@ -118,7 +118,7 @@ The Core Library's `Metadata.cfg` uses forward slashes, and so does everything
 Live writes itself:
 
 | File | strings with `\` | strings with `/` |
-|---|---|---|
+| --- | --- | --- |
 | `Factory Packs/Beat Tools/Ableton Folder Info/Metadata.cfg` | 1207 | 0 |
 | `Live 12 Core Library/Ableton Folder Info/Metadata.cfg` | 0 | 8400 |
 
@@ -136,7 +136,7 @@ Live index the pack normally. Rows per pack place, before and after
 f.place_id = p.file_id`):
 
 | Pack | before | after |
-|---|---|---|
+| --- | --- | --- |
 | Bomblastic | 4 | **901** |
 | Beat Tools | 9 | **631** |
 | Drum Essentials | 5 | **388** |
