@@ -6,7 +6,7 @@ qt_flags=$(pkg-config --cflags Qt5Widgets Qt5DBus libpipewire-0.3) || exit 1
 set -f
 # shellcheck disable=SC2086
 g++ -O2 -fPIC -shared -std=c++17 $qt_flags \
-  menufix.cpp vst3runloop.cpp pluginclose.cpp glsurface.cpp nativemenu.cpp window.cpp alsamidi.cpp alsaaudio.cpp pwdevices.cpp audiodrivers.cpp jackaudio.cpp filedialogs.cpp hook.cpp dragcursor.cpp pointerwarp.cpp scalechange.cpp sleepinhibit.cpp standalone.cpp embedded.cpp glibccompat.cpp livebuild.cpp vst3window11.cpp maxviews.cpp tempfolder.cpp pwgraph.cpp instance.cpp userthemes.cpp wheeltrace.cpp wheelvalues.cpp maxwheel.cpp \
+  menufix.cpp vst3runloop.cpp pluginclose.cpp glsurface.cpp nativemenu.cpp window.cpp alsamidi.cpp alsaaudio.cpp pwdevices.cpp audiodrivers.cpp jackaudio.cpp filedialogs.cpp hook.cpp dragcursor.cpp pointerwarp.cpp scalechange.cpp sleepinhibit.cpp standalone.cpp embedded.cpp glibccompat.cpp livebuild.cpp vst3window11.cpp maxviews.cpp tempfolder.cpp pwgraph.cpp instance.cpp userthemes.cpp wheeltrace.cpp wheelvalues.cpp wheelhorizontal.cpp maxwheel.cpp \
   -o "${1:-libmenufix.so}" -Wl,-soname,libmenufix.so -Wl,-Bsymbolic-functions -Wl,--version-script=qt5.map \
   -Wl,--no-as-needed -lQt5Widgets -lQt5Gui -lQt5DBus -lQt5Core -lasound -lX11 -ldl
 # libswupdate.so.0.1 (swupdate-stub.c, from PR #4): stand-in for the Push OS update library the Push 3 companion
