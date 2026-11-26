@@ -1,7 +1,7 @@
 // "Edit" on a Max for Live device (Live 12.4.7, Max 9.1.5). LIVE_MAX_EDIT=0 leaves the note
 // instead; otherwise the device opens in the bundled Linux Max editor (Resources/Max/Max)
 // through shim/max-editor. On by default: verified by editing and saving a device from Live.
-// The editor asks for an Ableton account the first time (see MAX_EDIT.md), and Max's own
+// The editor asks for an Ableton account the first time, and Max's own
 // start-up aborts now and then, so the first attempt can fail and a second one works.
 //
 // Live calls Wires::EditWithPreview in the Max runtime's libpatcher.so. With no Max editor
@@ -15,7 +15,6 @@
 // editorLaunchable). With LIVE_MAX_EDIT=1 the editor is Live's own Linux Max (Resources/Max/Max),
 // started through shim/max-editor, which preloads libmaxstatfix.so (see maxstatfix.c). Both
 // sides get working shared memory for the device's audio (maxshmem.c).
-// See MAX_EDIT.md.
 #include "livebuild.h"
 #include <QMessageBox>
 #include <cstdint>
