@@ -23,7 +23,7 @@ bool Runtime::load(const char *source, std::size_t size, const char *name, std::
   return result == 0;
 }
 
-bool Runtime::call(const char *name, std::string &error) {
+bool Runtime::call(const char *name, const std::vector<Argument> &arguments, std::string &error) {
   const int top = lua_gettop(state_);
   error.clear();
   lua_getglobal(state_, name);
@@ -36,7 +36,20 @@ bool Runtime::call(const char *name, std::string &error) {
     lua_settop(state_, top);
     return false;
   }
-  const int result = lua_pcall(state_, 0, 0, 0);
+  if (arguments.size() > 256 || !lua_checkstack(state_, static_cast<int>(arguments.size()))) {
+    error = "Too many Lua callback arguments";
+    lua_settop(state_, top);
+    return false;
+  }
+  for (const auto &argument : arguments) {
+    if (const auto *number = std::get_if<double>(&argument))
+      lua_pushnumber(state_, *number);
+    else {
+      const auto &string = std::get<std::string>(argument);
+      lua_pushlstring(state_, string.data(), string.size());
+    }
+  }
+  const int result = lua_pcall(state_, static_cast<int>(arguments.size()), 0, 0);
   if (result) {
     const char *message = lua_tostring(state_, -1);
     error = message ? message : "Lua raised a non-string error";

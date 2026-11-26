@@ -4,8 +4,11 @@
 #include <cstddef>
 #include <lua.hpp>
 #include <string>
+#include <variant>
+#include <vector>
 
 namespace jitlua {
+using Argument = std::variant<double, std::string>;
 class Runtime {
 public:
   Runtime();
@@ -14,7 +17,7 @@ public:
   Runtime &operator=(const Runtime &) = delete;
   lua_State *state() const noexcept { return state_; }
   bool load(const char *source, std::size_t size, const char *name, std::string &error);
-  bool call(const char *name, std::string &error);
+  bool call(const char *name, const std::vector<Argument> &arguments, std::string &error);
 
 private:
   lua_State *state_;
