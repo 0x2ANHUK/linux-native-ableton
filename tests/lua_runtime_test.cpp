@@ -2,6 +2,8 @@
 #include "../jitlua/lua_runtime.hpp"
 #include <cassert>
 #include <cstring>
+#include <memory>
+#include <stdexcept>
 #include <string>
 static int open_test_module(lua_State *state) {
   const char *name = lua_tostring(state, 1);
@@ -15,7 +17,15 @@ static int open_test_module(lua_State *state) {
 static int fail_module(lua_State *state) { return luaL_error(state, "module failed"); }
 
 int main() {
-  jitlua::Runtime vm;
+  std::unique_ptr<lua_State, decltype(&lua_close)> owned(luaL_newstate(), &lua_close);
+  assert(owned);
+  luaL_openlibs(owned.get()); // System Lua only: never use this initialization in Max.
+  try {
+    jitlua::Runtime invalid(nullptr);
+    assert(false && "null state must be rejected");
+  } catch (const std::invalid_argument &) {
+  }
+  jitlua::Runtime vm(owned.get());
   std::string error;
   assert(vm.registerModule("jit", open_test_module, error));
   assert(!vm.registerModule("broken", fail_module, error));

@@ -1,4 +1,5 @@
 // Contract: one Lua 5.1 VM per device; all methods run on the owning Max thread.
+// Borrow an already-initialized host-owned state; never open libraries or close it.
 // Bind Jitter, OpenGL and `this` before loading a device script. No audio-thread use.
 #pragma once
 #include <cstddef>
@@ -11,8 +12,8 @@ namespace jitlua {
 using Argument = std::variant<double, std::string>;
 class Runtime {
 public:
-  Runtime();
-  ~Runtime();
+  explicit Runtime(lua_State *borrowed);
+  ~Runtime() = default;
   Runtime(const Runtime &) = delete;
   Runtime &operator=(const Runtime &) = delete;
   lua_State *state() const noexcept { return state_; }

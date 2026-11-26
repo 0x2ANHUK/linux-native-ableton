@@ -25,8 +25,9 @@ started but did not load the probe; it was stopped after high CPU use.
 
 `jit.luaorigin` reports Lua symbol providers without creating a Lua state or
 executing Lua. Its mock-host test passes; real Max loading is not verified.
-`jit_lua_vm_probe.cpp` crashed Max and is retained solely for crash analysis.
-Do not build or load it. See `~/audio/research/JIT-GL-LUA-2026-11-26.md`.
+The earlier VM probe crashed Max and was removed from the working tree. Its
+source remains in commit `358e6ae` for analysis; do not build or load it. See
+`~/audio/research/JIT-GL-LUA-2026-11-26.md`.
 
 `jit.luanewprobe` obtains `luaL_newstate` and `lua_close` from the already-loaded
 MaxLua module and logs before and after each call. It does not open libraries or

@@ -3,12 +3,10 @@
 #include <stdexcept>
 
 namespace jitlua {
-Runtime::Runtime() : state_(luaL_newstate()) {
+Runtime::Runtime(lua_State *borrowed) : state_(borrowed) {
   if (!state_)
-    throw std::bad_alloc();
-  luaL_openlibs(state_);
+    throw std::invalid_argument("jitlua requires an initialized host-owned Lua state");
 }
-Runtime::~Runtime() { lua_close(state_); }
 
 bool Runtime::registerModule(const char *name, lua_CFunction opener, std::string &error) {
   const int top = lua_gettop(state_);
