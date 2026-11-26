@@ -10,6 +10,7 @@
 
 static method constructor;
 static int registered, created;
+static const char *expected_class;
 static char class_storage[1024];
 static t_symbol symbol;
 
@@ -22,7 +23,7 @@ t_class *class_new(const char *name, method make, method destroy, long size, met
   (void)destroy;
   (void)menu;
   (void)type;
-  assert(strcmp(name, "jit.linuxprobe") == 0 && size > 0);
+  assert(strcmp(name, expected_class) == 0 && size > 0);
   constructor = make;
   return (t_class *)class_storage;
 }
@@ -36,14 +37,18 @@ void *object_alloc(t_class *cls) {
   return calloc(1, 1024);
 }
 void object_post(t_object *object, const char *message, ...) {
-  assert(object && strcmp(message, "jit-lua-probe event=created") == 0);
-  created++;
+  assert(object);
+  if (strcmp(message, "jit-lua-probe event=created") == 0 ||
+      strcmp(message, "jit-lua-origin event=completed") == 0)
+    created++;
 }
 void post(const char *message, ...) {
-  assert(strcmp(message, "jit-lua-probe event=registered") == 0);
+  assert(strcmp(message, "jit-lua-probe event=registered") == 0 ||
+         strcmp(message, "jit-lua-origin event=registered") == 0);
 }
 int main(int argc, char **argv) {
-  assert(argc == 2);
+  assert(argc == 3);
+  expected_class = argv[2];
   void *module = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
   if (!module) {
     fprintf(stderr, "dlopen: %s\n", dlerror());
