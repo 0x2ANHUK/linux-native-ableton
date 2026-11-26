@@ -31,6 +31,22 @@ must outlive the Lua state; the caller must provide a current GL context and run
 on the graphics thread, never the audio callback. Missing contexts, invalid
 arguments and existing `opengl` registrations are errors.
 
+## MaxLua crash differential (offline)
+
+Two disposable processes loaded stock Lua globally, then the installed MaxLua,
+then called `max_lua_init()`, `luaL_newstate()` and `luaL_openlibs()`:
+
+| binding of MaxLua | result |
+| --- | --- |
+| default (preemptable) | SIGSEGV inside `luaL_openlibs` at `MaxLua.so+0x60a0f` |
+| opt-in `RTLD_DEEPBIND` on exact `MaxLua.so` | full lifecycle, clean exit |
+
+`tools/maxlua_isolation_check.py` reproduces the comparison; it needs
+`jitlua/probe/offline_max_init_stubs.c` (inert Max stubs) and the deepbind
+probe. This identifies symbol interposition as the mechanism and matches the
+earlier Max editor crashes, but does not prove the editor's load order.
+`max_lua_init()` must precede any Lua call: without it the state is invalid.
+
 The local tests use system Lua 5.1. The mock test checks dispatch and errors;
 the GLX test creates a separate pbuffer, draws a red quad through all seven
 operations and verifies a pixel. Both passed locally on NVIDIA GLX; neither
