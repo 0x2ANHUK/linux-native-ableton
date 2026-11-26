@@ -40,13 +40,15 @@ void object_post(t_object *object, const char *message, ...) {
   assert(object);
   if (strcmp(message, "jit-lua-probe event=created") == 0 ||
       strcmp(message, "jit-lua-origin event=completed") == 0 ||
-      strcmp(message, "jit-lua-new event=close_ok") == 0)
+      strcmp(message, "jit-lua-new event=close_ok") == 0 ||
+      strcmp(message, "jit-lua-stdlib event=close_ok") == 0)
     created++;
 }
 void post(const char *message, ...) {
   assert(strcmp(message, "jit-lua-probe event=registered") == 0 ||
          strcmp(message, "jit-lua-origin event=registered") == 0 ||
-         strcmp(message, "jit-lua-new event=registered") == 0);
+         strcmp(message, "jit-lua-new event=registered") == 0 ||
+         strcmp(message, "jit-lua-stdlib event=registered") == 0);
 }
 int main(int argc, char **argv) {
   assert(argc == 3 || argc == 4);

@@ -31,3 +31,6 @@ Do not build or load it. See `~/audio/research/JIT-GL-LUA-2026-11-26.md`.
 `jit.luanewprobe` obtains `luaL_newstate` and `lua_close` from the already-loaded
 MaxLua module and logs before and after each call. It does not open libraries or
 run scripts. Mock-host testing covers sequencing only; it may crash real Max.
+
+`jit.lualibprobe` next opens Lua's standard libraries and logs before and after;
+it may crash Max and has only been checked against a fake library.

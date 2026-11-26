@@ -3,3 +3,5 @@
 static int fake_state;
 void *luaL_newstate(void) { return &fake_state; }
 void lua_close(void *state) { assert(state == &fake_state); }
+
+void luaL_openlibs(void *state) { assert(state == &fake_state); }
