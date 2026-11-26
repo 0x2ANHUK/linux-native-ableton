@@ -52,3 +52,20 @@ The real `MaxLua.so` was also inspected in a disposable process without calling
 Lua: a previously global stock Lua caused eight `luaopen_*` relocations to point
 outside MaxLua; opt-in isolation kept all 147 observed slots in MaxLua. This
 shows a possible mechanism, **not** the cause of the two editor crashes.
+
+## Disposable vendor-library check
+
+The optional `tools/maxlua_offline_probe.py` uses the user's local MaxLua and
+JitterAPI binaries in a **separate process**, not Max or Live. It requires the
+locally built deepbind probe, linker-only `offline_max_host.c` stubs, and a
+separately supplied foreign Lua library. The stubs abort if any Max API is
+called. The child checks observed Lua relocation slots before executing a fixed
+Lua math expression; it disables core dumps and receives a limited environment.
+It is not a container or security sandbox. Run the command only as a detached
+agent job and inspect its log; a failure must not be retried unchanged.
+
+On the local Max 9.1.5 libraries, the positive isolated run opened Lua's
+standard libraries, evaluated `math.floor(4.9)` and closed the state. A
+negative test with a forwarding-only shim stopped at the symbol preflight before
+creating a state. Neither result proves the Max editor's bindings or a device
+fix; Lua module registration, Jitter and OpenGL were not exercised.

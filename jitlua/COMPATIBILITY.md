@@ -65,3 +65,10 @@ loads, and `RTLD_DEEPBIND` changes interposition semantics. `JitterAPI.so` has
 loads bypass the wrapper; an explicit earlier protected load preserves local
 bindings in that model. The real editor load order and allocator/runtime risks
 remain unverified; do not deploy the experiment.
+
+With foreign Lua loaded first, the opt-in isolation probe allowed the local
+MaxLua 9.1.5 library to initialize its standard libraries, evaluate a fixed
+math expression, and close in a disposable process. Linker-only fake Max
+symbols abort if called. A forwarding-only loader was rejected by the
+relocation preflight before a Lua state was created. This is not a test of
+Max's own process, editor load order, Jitter calls, or the crashing device.
