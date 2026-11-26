@@ -39,15 +39,21 @@ void *object_alloc(t_class *cls) {
 void object_post(t_object *object, const char *message, ...) {
   assert(object);
   if (strcmp(message, "jit-lua-probe event=created") == 0 ||
-      strcmp(message, "jit-lua-origin event=completed") == 0)
+      strcmp(message, "jit-lua-origin event=completed") == 0 ||
+      strcmp(message, "jit-lua-new event=close_ok") == 0)
     created++;
 }
 void post(const char *message, ...) {
   assert(strcmp(message, "jit-lua-probe event=registered") == 0 ||
-         strcmp(message, "jit-lua-origin event=registered") == 0);
+         strcmp(message, "jit-lua-origin event=registered") == 0 ||
+         strcmp(message, "jit-lua-new event=registered") == 0);
 }
 int main(int argc, char **argv) {
-  assert(argc == 3);
+  assert(argc == 3 || argc == 4);
+  if (argc == 4) {
+    void *fake_lua = dlopen(argv[3], RTLD_NOW | RTLD_GLOBAL);
+    assert(fake_lua);
+  }
   expected_class = argv[2];
   void *module = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
   if (!module) {

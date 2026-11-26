@@ -27,3 +27,7 @@ started but did not load the probe; it was stopped after high CPU use.
 executing Lua. Its mock-host test passes; real Max loading is not verified.
 `jit_lua_vm_probe.cpp` crashed Max and is retained solely for crash analysis.
 Do not build or load it. See `~/audio/research/JIT-GL-LUA-2026-11-26.md`.
+
+`jit.luanewprobe` obtains `luaL_newstate` and `lua_close` from the already-loaded
+MaxLua module and logs before and after each call. It does not open libraries or
+run scripts. Mock-host testing covers sequencing only; it may crash real Max.
