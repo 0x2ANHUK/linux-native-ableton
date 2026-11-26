@@ -36,3 +36,17 @@ and 18 without named files; none was validated by this scan.
   identifies code at the recorded MaxLua crash offset, not its causal input.
   Runtime facts and the quarantined probe are recorded in
   `~/audio/research/JIT-GL-LUA-2026-11-26.md`.
+
+## Read-only ABI evidence (2026-11-26)
+
+`python3 tools/maxlua_bindings.py --pid PID --json` reads only mapped Lua
+relocation slots and the exported class pointer; it does not attach or invoke
+Lua. In the running Live-hosted Max, 147 Lua relocation slots pointed into
+MaxLua, `lua_class` was initialized, and `luaO_nilobject_` pointed to MaxLua's
+own symbol. Lazy slots may be unresolved. The crashed editor was a different
+process, so these observations do not establish its bindings or crash cause.
+
+REA `ev_4335c1c31e1d038221bd041f9b71d1ec859f30efb3a4664ee97f31d88aea23fc`
+shows Max's `lua_create` initializes Max's Lua class, then opens libraries and
+installs Max's module loader. Use of that lifecycle has not been tested. The
+runtime core therefore borrows an initialized state and never opens libraries.
